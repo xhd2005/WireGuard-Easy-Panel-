@@ -7,6 +7,8 @@
 # 注意本文件只影响本仓库，不修改任何人的全局 git 配置。
 
 *.sh          text eol=lf
+*.mod         text eol=lf
+*.sum         text eol=lf
 *.conf        text eol=lf
 *.go          text eol=lf
 *.md          text eol=lf
