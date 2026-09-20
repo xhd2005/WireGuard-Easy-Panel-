@@ -1,45 +1,16 @@
 #!/bin/bash
 
+# 脚本顶层不做任何系统写操作。
+# 历史版本的 DNS 改配置块位于此处，会在 check_root / check_os / check_container
+# （它们在 wgsetup() 内，直到脚本末尾才执行）之前就清空 /etc/systemd/resolved.conf
+# 并改 /etc/resolv.conf —— 于是不支持的系统、容器、权限不足的场景都会先把主机 DNS 改坏
+# 再报错退出。整块已移除，改为安装分支内的 check_dns_resolution：只探测、只报错，
+# 绝不自动改系统配置。
 echo "
 WireGuard 安装脚本
 ==========================
 作者：包崽同学 （二改汉化）
 "
->/etc/systemd/resolved.conf
-if [[ ! -f ./wg.txt ]]; then
-  echo "1" >./wg.txt
-fi
-
-if [[ $(cat ./wg.txt) -eq 1 ]]; then
-  systemctl stop systemd-resolved #停用systemd-resolved服务
-  ping -c1 www.google.com &>/dev/null
-  if [ $? == 0 ]; then # 判断是否能ping通
-    mv /etc/systemd/resolved.conf /etc/systemd/resolved.conf.bak
-    echo "备份系统DNS配置成功>> 目录/etc/systemd/resolved.conf.bak"
-    echo "当前服务器可以正常访问外网>>DNS配置1.1.1.1"
-    echo "
-      [Resolve]
-    DNS=1.1.1.1  #国外DNS
-    DNSStubListener=no
-" >>/etc/systemd/resolved.conf
-
-    echo "2" >./wg.txt
-    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
-    iptables -I INPUT -p UDP --dport 53 -j ACCEPT
-  else
-    mv /etc/systemd/resolved.conf /etc/systemd/resolved.conf.bak
-    echo "备份系统DNS配置成功>> 目录/etc/systemd/resolved.conf.bak"
-    echo "当前服务器无法正常访问外网>>DNS配置223.5.5.5"
-    echo "
-     [Resolve]
-    DNS=223.5.5.5  #国内DNS
-    DNSStubListener=no
-" >>/etc/systemd/resolved.conf
-    echo "2" >./wg.txt
-    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
-    iptables -I INPUT -p UDP --dport 53 -j ACCEPT
-  fi
-fi
 
 # 错误退出函数：输出错误信息并退出（状态码1）
 exiterr() {
@@ -155,6 +126,33 @@ check_container() {
   fi
 }
 
+# 探测出站 DNS 解析是否可用。只报错，不改任何系统配置。
+# 后续步骤要用 wget/curl 从 GitHub 与发行版源拉包，解析不通会静默产出
+# 空的 sysctl 优化文件，所以必须早于 install_pkgs 拦下来。
+check_dns_resolution() {
+  # 用镜像源域名而非 www.google.com：大陆节点 ping 不通 Google 是常态，
+  # 拿它当"能否上外网"的判据会在目标环境上系统性走错分支。
+  probe_host="mirrors.tencent.com"
+  if getent hosts "$probe_host" >/dev/null 2>&1; then
+    return 0
+  fi
+  # 换两个公共域名的解析器再试一次，区分"没有 DNS 配置"与"上游 DNS 不可达"
+  if [ -x /usr/bin/nslookup ] || [ -x /usr/bin/dig ]; then
+    exiterr "无法解析 $probe_host。系统 DNS 可能未配置或其上游不可达。
+本脚本不会自动修改系统 DNS 配置，请自行确认 /etc/resolv.conf 或
+resolvectl 的 DNS 设置后重试。"
+  fi
+  exiterr "无法解析 $probe_host，且系统缺少 nslookup/dig 供进一步诊断。
+请确认 DNS 可用后重试。本脚本不会自动修改系统 DNS 配置。"
+}
+
+# 判定本机防火墙走的是 firewalld 还是 iptables 分支。
+# create_firewall_rules 与 update_rclocal 必须用同一个判据，否则会出现
+# "firewalld 机器上 rc.local 每次开机重启一个根本不存在的 wg-iptables.service"。
+firewall_uses_firewalld() {
+  systemctl is-active --quiet firewalld.service
+}
+
 # 处理客户端名称（过滤特殊字符，限制长度为15字符）
 set_client_name() {
   # 仅保留字母、数字、短横线（-）和下划线（_），其他字符替换为下划线
@@ -174,7 +172,7 @@ parse_args() {
     --addclient)
       # 添加新客户端
       add_client=1
-      unsanitized_client="$2"
+      unsanitized_client="${2:-}"
       shift
       shift
       ;;
@@ -186,14 +184,14 @@ parse_args() {
     --removeclient)
       # 删除指定客户端
       remove_client=1
-      unsanitized_client="$2"
+      unsanitized_client="${2:-}"
       shift
       shift
       ;;
     --showclientqr)
       # 显示指定客户端的QR码（用于手机客户端扫码配置）
       show_client_qr=1
-      unsanitized_client="$2"
+      unsanitized_client="${2:-}"
       shift
       shift
       ;;
@@ -204,31 +202,31 @@ parse_args() {
       ;;
     --serveraddr)
       # 指定服务器地址（FQDN或IPv4）
-      server_addr="$2"
+      server_addr="${2:-}"
       shift
       shift
       ;;
     --port)
       # 指定WireGuard监听端口
-      server_port="$2"
+      server_port="${2:-}"
       shift
       shift
       ;;
     --clientname)
       # 指定第一个客户端的名称
-      first_client_name="$2"
+      first_client_name="${2:-}"
       shift
       shift
       ;;
     --dns1)
       # 指定客户端的首选DNS服务器
-      dns1="$2"
+      dns1="${2:-}"
       shift
       shift
       ;;
     --dns2)
       # 指定客户端的备用DNS服务器
-      dns2="$2"
+      dns2="${2:-}"
       shift
       shift
       ;;
@@ -437,7 +435,9 @@ EOF
 
 # 显示帮助信息（命令行参数说明）
 show_usage() {
-  if [ -n "$1" ]; then
+  # ${1:-} 而非 $1：-h/--help 分支是无参调用本函数的，脚本启用 set -u 后
+  # 直接引用 $1 会以 "unbound variable" 崩掉。
+  if [ -n "${1:-}" ]; then
     echo "错误：$1" >&2
   fi
   show_header
@@ -910,7 +910,10 @@ EOF
 
 # 创建防火墙规则（根据防火墙类型配置iptables或firewalld）
 create_firewall_rules() {
-  if systemctl is-active --quiet firewalld.service; then
+  # 判据收敛到 firewall_uses_firewalld()，与 update_rclocal 共用同一个来源，
+  # 避免两处判断漂移（历史上正因为漂移，firewalld 机器的 rc.local 会去 restart
+  # 一个从未被创建的 wg-iptables.service）。
+  if firewall_uses_firewalld; then
     # 使用firewalld配置规则（临时+永久，避免重载firewalld）
     firewall-cmd -q --add-port="$port"/udp
     firewall-cmd -q --zone=trusted --add-source=10.7.0.0/24
@@ -971,13 +974,26 @@ WantedBy=multi-user.target" >>/etc/systemd/system/wg-iptables.service
 
 # 移除防火墙规则（卸载WireGuard时）
 remove_firewall_rules() {
-  # 从服务器配置中提取监听端口
-  port=$(grep '^ListenPort' "$WG_CONF" | cut -d " " -f 3)
-  if systemctl is-active --quiet firewalld.service; then
-    # 移除firewalld规则（临时+永久）
-    firewall-cmd -q --remove-port="$port"/udp
+  # 需要清理的端口集合 = 当前 wg0.conf 里的 ListenPort + wg-iptables.service
+  # 中声明过的所有 --dport。换过端口再卸载时，旧端口的放行规则仍在内核态
+  # （或 firewalld 的 permanent 配置里），而单元文件每次重装都被整体覆写、
+  # 不再声明它 —— 只按当前 ListenPort 移除会让旧端口永久残留。
+  ports=$(
+    {
+      grep -E '^ListenPort' "$WG_CONF" 2>/dev/null | awk '{print $3}'
+      [ -f /etc/systemd/system/wg-iptables.service ] &&
+        grep -oE -- '--dport [0-9]+' /etc/systemd/system/wg-iptables.service | awk '{print $2}'
+    } | sort -un
+  )
+  # 兜底：集合为空时退回当前配置端口
+  [ -n "$ports" ] || ports=$(grep -E '^ListenPort' "$WG_CONF" | awk '{print $3}')
+  if firewall_uses_firewalld; then
+    # 移除firewalld规则（临时+永久），逐个端口
+    for port in $ports; do
+      firewall-cmd -q --remove-port="$port"/udp
+      firewall-cmd -q --permanent --remove-port="$port"/udp
+    done
     firewall-cmd -q --zone=trusted --remove-source=10.7.0.0/24
-    firewall-cmd -q --permanent --remove-port="$port"/udp
     firewall-cmd -q --permanent --zone=trusted --remove-source=10.7.0.0/24
     firewall-cmd -q --direct --remove-rule ipv4 nat POSTROUTING 0 -s 10.7.0.0/24 ! -d 10.7.0.0/24 -j MASQUERADE
     firewall-cmd -q --permanent --direct --remove-rule ipv4 nat POSTROUTING 0 -s 10.7.0.0/24 ! -d 10.7.0.0/24 -j MASQUERADE
@@ -989,8 +1005,18 @@ remove_firewall_rules() {
       firewall-cmd -q --permanent --direct --remove-rule ipv6 nat POSTROUTING 0 -s fddd:2c4:2c4:2c4::/64 ! -d fddd:2c4:2c4:2c4::/64 -j MASQUERADE
     fi
   else
-    # 停止并禁用wg-iptables服务，删除服务配置文件
+    # 停止并禁用wg-iptables服务（其 ExecStop 只会移除单元文件里声明的那个端口）
     systemctl disable --now wg-iptables.service
+    # 再把集合里其余历史端口从内核态逐个清掉，避免换过端口后留下僵尸放行规则。
+    # 后端判定与 create_firewall_rules 保持一致（openvz + nft 后端要用 legacy 版本）。
+    iptables_path=$(command -v iptables)
+    if [[ $(systemd-detect-virt) == "openvz" ]] && readlink -f "$(command -v iptables)" | grep -q "nft" && hash iptables-legacy 2>/dev/null; then
+      iptables_path=$(command -v iptables-legacy)
+    fi
+    for port in $ports; do
+      # -D 对不存在的规则会报错，这里属预期（当前端口已被 ExecStop 删掉），忽略即可
+      $iptables_path -w 5 -D INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null || true
+    done
     rm -f /etc/systemd/system/wg-iptables.service
   fi
 }
@@ -1000,7 +1026,9 @@ get_export_dir() {
   export_to_home_dir=0
   export_dir=~/
   # 若通过sudo执行脚本，且sudo用户存在，将配置保存到该用户家目录
-  if [ -n "$SUDO_USER" ] && getent group "$SUDO_USER" >/dev/null 2>&1; then
+  # ${SUDO_USER:-}：脚本允许 `su -` 后以 root 直接执行，此时 SUDO_USER 根本不存在，
+  # 裸引用在 set -u 下会直接崩掉。
+  if [ -n "${SUDO_USER:-}" ] && getent group "$SUDO_USER" >/dev/null 2>&1; then
     user_home_dir=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
     if [ -d "$user_home_dir" ] && [ "$user_home_dir" != "/" ]; then
       export_dir="$user_home_dir/"
@@ -1063,15 +1091,21 @@ select_dns() {
 
 # 为新客户端分配VPN子网内的IP地址（自动分配未使用的地址）
 select_client_ip() {
-  # 从10.7.0.2开始分配（10.7.0.1为服务器地址）
-  octet=2
-  # 循环查找第一个未被使用的IP地址（检查AllowedIPs字段）
-  while grep AllowedIPs "$WG_CONF" | cut -d "." -f 4 | cut -d "/" -f 1 | grep -q "^$octet$"; do
-    ((octet++))
+  # 精确提取已占用的 v4 末段。旧写法 `grep AllowedIPs | cut -d "." -f 4 | cut -d "/" -f 1`
+  # 依赖"IPv6 地址恰好写在同一行"这个偶然结构，且会把 v6 部分一起截进来。
+  used=$(grep -oE 'AllowedIPs = 10\.7\.0\.[0-9]{1,3}/32' "$WG_CONF" |
+    sed -E 's|.*10\.7\.0\.([0-9]{1,3})/32.*|\1|')
+  # 从 10.7.0.2 开始分配（10.7.0.1 为服务器地址），上限 254
+  octet=0
+  for candidate in $(seq 2 254); do
+    if ! printf '%s\n' "$used" | grep -qx "$candidate"; then
+      octet=$candidate
+      break
+    fi
   done
-  # 若IP地址段已满（超过254），报错退出
-  if [[ "$octet" -eq 255 ]]; then
-    exiterr "已配置253个客户端，WireGuard内部子网地址已用尽！"
+  # 一个可用末段都没找到，说明子网已满（.2-.254 共 253 个）
+  if [ "$octet" -eq 0 ]; then
+    exiterr "已配置253个客户端，WireGuard内部子网 10.7.0.2-10.7.0.254 地址已用尽！"
   fi
 }
 
@@ -1081,7 +1115,8 @@ new_client() {
   select_client_ip
   specify_ip=n
   # 仅在交互式添加客户端时，允许用户手动指定IP
-  if [ "$1" = "add_client" ] && [ "$add_client" = 0 ]; then
+  # ${1:-}：安装分支里本函数是裸调用（new_client），无位置参数
+  if [ "${1:-}" = "add_client" ] && [ "$add_client" = 0 ]; then
     echo
     read -rp "是否为新客户端手动指定内部IP地址？[y/N]：" specify_ip
     # 验证用户输入（y/Y/n/N）
@@ -1293,8 +1328,10 @@ enter_client_name() {
 
 # 将新客户端配置更新到运行中的WireGuard接口（无需重启服务）
 update_wg_conf() {
-  # 提取新客户端的Peer配置并添加到wg0接口
-  wg addconf wg0 <(sed -n "/^# BEGIN_PEER $client/,/^# END_PEER $client/p" "$WG_CONF")
+  # 用 syncconf 而非 addconf：addconf 只新增/覆盖同名 peer，不会移除配置文件中
+  # 已删除的 peer，于是删除操作后内核态与文件态长期不一致。syncconf 会把内核里
+  # 存在但配置中已不存在的 peer 一并删掉，增、删、改共用同一条生效路径。
+  wg syncconf wg0 <(sed -n "/^# BEGIN_PEER $client/,/^# END_PEER $client/p" "$WG_CONF")
 }
 
 # 显示客户端添加成功的提示信息
@@ -1478,6 +1515,14 @@ print_wg_removal_aborted() {
 # WireGuard核心配置函数（整合所有步骤）
 wgsetup() {
 
+  # -u：捕获拼写错误的变量名与未初始化引用（本文件已把 $1/$2/SUDO_USER 这类
+  #     合法可选项改为 ${var:-} 形式）。
+  # -o pipefail：管道中段失败不再被末端命令的退出码掩盖 —— 本脚本大量使用
+  #     `grep | cut | grep` 链，默认行为下前半段挂了也会返回成功。
+  # 刻意不使用 -e：installer 里有大量"允许失败"的命令（探测、可选包安装、
+  # 分支判断），全局 -e 会造成误退出。关键写操作逐个显式判断返回值。
+  set -uo pipefail
+
   # 设置环境变量PATH（确保命令可正常找到）
   export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -1509,6 +1554,9 @@ wgsetup() {
   dns=""                # 客户端DNS服务器配置字符串
   dns1=""               # 客户端首选DNS服务器（--dns1参数）
   dns2=""               # 客户端备用DNS服务器（--dns2参数）
+  ip6=""                # 服务器IPv6地址（detect_ipv6 赋值；显式初始化，
+                        # 这样即使 create_server_config/update_sysctl 将来被新的
+                        # 分支调用，也不会在 set -u 下踩到未定义引用）
 
   # 解析命令行参数
   parse_args "$@"
@@ -1586,6 +1634,9 @@ wgsetup() {
   if [[ ! -e "$WG_CONF" ]]; then
     # 额外检查：CentOS系统是否启用nftables（不支持）
     check_nftables
+    # DNS 可用性自检。放在 install_wget 之前 —— 拉包就需要解析。
+    # 只探测并报错，绝不修改系统 DNS 配置（原改配置块已整体删除，见文件顶部说明）。
+    check_dns_resolution
     # 安装必需工具：wget、iproute2
     install_wget
     install_iproute
@@ -1630,8 +1681,11 @@ wgsetup() {
     update_sysctl
     # 创建防火墙规则
     create_firewall_rules
-    # 非openSUSE系统：更新rc.local（确保重启后加载iptables规则）
-    if [ "$os" != "openSUSE" ]; then
+    # 仅 iptables 分支且非 openSUSE 时才写 rc.local。
+    # wg-iptables.service 只在 create_firewall_rules 的 iptables 分支里被创建；
+    # firewalld 机器上往 rc.local 塞 `systemctl restart wg-iptables.service`
+    # 等于每次开机静默重启一个根本不存在的 unit。判据与 create_firewall_rules 同源。
+    if [ "$os" != "openSUSE" ] && ! firewall_uses_firewalld; then
       update_rclocal
     fi
     # 创建第一个客户端配置
