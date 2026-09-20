@@ -1,0 +1,14 @@
+# 未脱敏的原始采集件 —— 内含真实私钥，绝不允许进入版本库
+fixtures/raw/
+
+# 构建产物：前端 dist 由 scripts/build.sh 生成后供 go:embed 使用
+panel/web/node_modules/
+panel/web/dist/
+panel/bin/
+
+# 编辑器与系统噪声
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
