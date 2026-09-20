@@ -506,6 +506,7 @@ GET    /api/version                      -> {version,commit,buildTime}
 - 默认 `--listen 127.0.0.1:8734`。**不用 8080** —— 实测目标机上 `docker-proxy` 已把 `0.0.0.0:8080` 绑走（`hayden-backend` 发布的），面板会以 `bind: address already in use` 启动失败。`8734` 经 `ss -lntu` 确认空闲。端口冲突时面板必须打印"端口被 `<进程名>` 占用"并以非零码退出，而不是静默换端口 —— 那样用户下次 `ssh -L` 会转错地方
 - 若 `--listen` 指向非回环地址且未提供 `--tls-cert/--tls-key`，**启动即失败**，除非显式 `--allow-insecure`；错误信息直接给出 `ssh -L 8734:127.0.0.1:8734 <host>` 用法
 - 敏感数据边界：`PrivateKey` 与 `PresharedKey` 不出现在任何列表/详情接口响应体；仅在 `config`/`qr.png`/`export.zip` 三个明确导出接口返回，带 `no-store` 且不写访问日志
+- **`status` 包的一条硬约束（2026-09-20 采集 fixture 时踩出来的雷）**：`wg show <iface> dump` 的列序里，接口行第 2 列是**明文 private key**、peer 行第 2 列是**明文 preshared key** —— 与 `wg show <iface>` 的 `(hidden)` 行为完全不同。`dump` 制表符分隔、比人类可读输出好解析，实现时几乎一定会想用它，因此必须写死：使用 `dump` 时**显式丢弃第 2 列**再进结构体，且任何情况下都不得把 `dump` 的原始输出写进日志、错误信息、API 响应或 `/api/status`。单测必须覆盖"`dump` 输入 → 响应体不含密钥"这条断言（见 13.1）
 - 名称校验：`^[A-Za-z0-9_-]{1,15}$`。**合法字符集**与 `set_client_name`（`wg.sh:159-163`）一致，处理方式刻意更严 —— `wg.sh` 静默把非法字符替换为 `_` 并截断到 15 字符，面板直接 `400` 拒绝。GUI 下静默改名会让用户导入一个与输入不同的 peer。副作用是面板产出的名称必然是 `wg.sh` 也认可的合法值，两个入口可互相管理
 
 ## 11. 错误处理
@@ -577,7 +578,7 @@ ReadWritePaths=/etc/wireguard /var/lib/wg-panel /etc/wg-panel /var/backups/wg-pa
 |---|---|
 | `wgconf` | **golden 往返**：读入 `fixtures/` 中 `wg.sh` 真实产物（含 IPv6 / 不含 IPv6 两份，后者是 4.4 的主场景），解析→写出，断言字节完全相同；再断言增、删、改端口、改 endpoint、改 MTU 后重解析正确，且标记行仍匹配 `wg.sh` 的 sed 模式；缺 `# DNS` 行的存量 peer 走 7.2 回落分支 |
 | `keygen` | 纯 Go curve25519 输出与 `wg genkey`/`wg pubkey` 产物格式一致（base64 可解码、解码后 32 字节） |
-| `status` | 多份 `wg show` fixture：从未握手的 peer、endpoint 带 IPv6 方括号、空接口 |
+| `status` | 多份 `wg show` fixture：从未握手的 peer、endpoint 带 IPv6 方括号、空接口；**以及一条安全断言：喂入 `wg show dump` 制式的输入（第 2 列含明文私钥/PSK）后，解析结果与任何序列化输出中都不出现该密钥串** |
 | `firewall` | 两个分支各自的命令序列正确性（含"不加 `--reload`"这条断言） |
 | `api` | `httptest` + fake `apply.Runner`，覆盖登录、CRUD、权限、错误码映射、降级模式拒绝写入；测试内不外呼真实命令 |
 
