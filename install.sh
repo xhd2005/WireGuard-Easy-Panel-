@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # WireGuard Web Panel 一键安装与管理脚本
-# 项目地址: https://github.com/xaxanb/wg
+# 项目地址: https://github.com/xhd2005/WireGuard-Easy-Panel-
 # 适用系统: Ubuntu 20.04+, Debian 11+, CentOS 8+, Alma/Rocky 8+, Fedora
 # ==============================================================================
 set -euo pipefail
 
-GITHUB_REPO="xaxanb/wg"
+GITHUB_REPO="xhd2005/WireGuard-Easy-Panel-"
 INSTALL_DIR="/usr/local/bin"
 SERVICE_NAME="wg-panel"
 SYSTEMD_DIR="/etc/systemd/system"

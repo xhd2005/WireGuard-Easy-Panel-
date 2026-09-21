@@ -6,7 +6,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
-[![Platform](https://img.shields.io/badge/Platform-Linux%20(amd64%20%7C%20arm64)-blue?style=flat-square&logo=linux)](https://github.com/xaxanb/wg)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20(amd64%20%7C%20arm64)-blue?style=flat-square&logo=linux)](https://github.com/xhd2005/WireGuard-Easy-Panel-)
 [![Zero CDN](https://img.shields.io/badge/Dependencies-Zero%20External%20CDN-success?style=flat-square)](#-零外部-cdn-依赖)
 [![Status](https://img.shields.io/badge/Production-Ready-brightgreen?style=flat-square)](#)
 
@@ -91,7 +91,7 @@
 只需在服务器终端运行一行命令（若服务器未安装 WireGuard，脚本会自动引导安装底层环境）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xaxanb/wg/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/xhd2005/WireGuard-Easy-Panel-/main/install.sh | sudo bash
 ```
 
 安装完成后，终端会直接打印出：
@@ -286,8 +286,8 @@ net.core.wmem_max = 16777216         # UDP Socket 发送缓冲区上限 16MB
 
 ```bash
 # 1. 克隆代码仓库
-git clone https://github.com/xaxanb/wg.git
-cd wg
+git clone https://github.com/xhd2005/WireGuard-Easy-Panel-.git
+cd WireGuard-Easy-Panel-
 
 # 2. 本地直接运行单元测试 (全量覆盖)
 cd panel && go test ./... -v
@@ -322,6 +322,6 @@ bash scripts/build.sh
 
 ### Quick Install
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xaxanb/wg/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/xhd2005/WireGuard-Easy-Panel-/main/install.sh | sudo bash
 ```
 Once installed, connect via SSH port forwarding (`ssh -L 8734:127.0.0.1:8734 root@<server_ip>`) or access via WireGuard tunnel (`http://10.7.0.1:8734`).
