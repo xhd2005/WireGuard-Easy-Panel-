@@ -1,0 +1,11 @@
+interface: wg0
+  public key: rXMT3K0AM9I5B7D/S5f/HaLaUP7yVyZdQRFfRuenlRE=
+  private key: (hidden)
+  listening port: 53
+
+peer: mUuGofDVp+yBuo7u6SgGRRfYOao597gC9U8pSXu7BXw=
+  preshared key: (hidden)
+  endpoint: [2001:db8::1]:51820
+  allowed ips: 10.7.0.2/32, fddd:2c4:2c4:2c4::2/128
+  latest handshake: 5 minutes ago
+  transfer: 12.34 MiB received, 45.67 MiB sent

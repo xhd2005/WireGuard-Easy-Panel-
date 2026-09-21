@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WireGuard 管理面板</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --success: #10b981;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 1rem;
+      min-height: 100vh;
+    }
+    .container { max-width: 1000px; margin: 0 auto; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 0 2rem;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 1.5rem;
+    }
+    h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      background: #0284c7;
+    }
+    .btn {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 0.875rem;
+      transition: background 0.15s ease;
+    }
+    .btn:hover { background: var(--primary-hover); }
+    .btn-secondary { background: #475569; }
+    .btn-secondary:hover { background: #334155; }
+    .btn-danger { background: var(--danger); }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+    .card-title {
+      font-size: 1.1rem;
+      margin-bottom: 1rem;
+      color: var(--text);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .info-item label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+    .info-item span { font-weight: 600; font-size: 1rem; }
+    .banner {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid var(--warning);
+      color: #fbbf24;
+      padding: 1rem;
+      border-radius: var(--radius);
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      font-size: 0.9rem;
+    }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+    th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--card-border); font-size: 0.875rem; }
+    th { color: var(--text-muted); font-weight: 500; }
+    .peer-key { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); }
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 0.4rem;
+    }
+    .status-online { background: var(--success); }
+    .status-offline { background: #64748b; }
+    .login-box {
+      max-width: 400px;
+      margin: 10vh auto;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      padding: 2rem;
+      border-radius: var(--radius);
+    }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; margin-bottom: 0.5rem; font-size: 0.875rem; color: var(--text-muted); }
+    .form-control {
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      color: #fff;
+      font-size: 0.875rem;
+    }
+    .form-control:focus { outline: none; border-color: var(--primary); }
+    .error-msg {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid var(--danger);
+      color: #f87171;
+      padding: 0.6rem;
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+    .hidden { display: none !important; }
+    .modal {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 99;
+    }
+  </style>
+</head>
+<body>
+  <div id="login-view" class="login-box hidden">
+    <h2 style="margin-bottom: 1.5rem; text-align: center;">WireGuard 登录</h2>
+    <div id="login-error" class="error-msg hidden"></div>
+    <form id="login-form">
+      <div class="form-group">
+        <label for="username">用户名</label>
+        <input type="text" id="username" class="form-control" value="admin" required autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label for="password">密码</label>
+        <input type="password" id="password" class="form-control" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn" style="width: 100%; margin-top: 0.5rem;">登 录</button>
+    </form>
+  </div>
+
+  <div id="pwd-modal" class="modal hidden">
+    <div class="login-box" style="margin: 0; width: 100%;">
+      <h3 style="margin-bottom: 1rem;">修改密码</h3>
+      <p id="pwd-notice" style="font-size: 0.85rem; color: var(--warning); margin-bottom: 1rem;" class="hidden">
+        ⚠️ 首次登录必须先修改初始密码！
+      </p>
+      <div id="pwd-error" class="error-msg hidden"></div>
+      <form id="pwd-form">
+        <div class="form-group">
+          <label for="old-pwd">原密码</label>
+          <input type="password" id="old-pwd" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label for="new-pwd">新密码（至少 8 位）</label>
+          <input type="password" id="new-pwd" class="form-control" minlength="8" required>
+        </div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;">
+          <button type="button" id="pwd-cancel-btn" class="btn btn-secondary">取消</button>
+          <button type="submit" class="btn">确认修改</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="dashboard-view" class="container hidden">
+    <header>
+      <h1>WireGuard 面板 <span class="badge" id="version-badge">v0.1.0</span></h1>
+      <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <button id="change-pwd-btn" class="btn btn-secondary" style="font-size: 0.8rem;">修改密码</button>
+        <button id="logout-btn" class="btn btn-danger" style="font-size: 0.8rem;">登出</button>
+      </div>
+    </header>
+
+    <div id="firewall-warning" class="banner hidden">
+      <div>⚠️</div>
+      <div>
+        <strong>防火墙可能未放行：</strong>检测到当前所有客户端均未发生握手（从未连接）。
+        若您部署在腾讯云等云服务器上，请务必检查云控制台的<strong>安全组 / 防火墙规则</strong>是否已放行此服务器的 WireGuard UDP 端口！
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <span>服务器状态</span>
+        <button id="refresh-btn" class="btn btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">刷新</button>
+      </div>
+      <div class="grid">
+        <div class="info-item"><label>公网端点 (Endpoint)</label><span id="srv-endpoint">-</span></div>
+        <div class="info-item"><label>监听端口 (UDP)</label><span id="srv-port">-</span></div>
+        <div class="info-item"><label>IPv4 虚拟子网</label><span id="srv-subnet4">-</span></div>
+        <div class="info-item"><label>IPv6 虚拟子网</label><span id="srv-subnet6">-</span></div>
+        <div class="info-item"><label>MTU</label><span id="srv-mtu">-</span></div>
+        <div class="info-item"><label>宿主防火墙识别</label><span id="srv-firewall">-</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">客户端列表 (<span id="clients-count">0</span>)</div>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>虚拟 IP</th>
+              <th>在线状态</th>
+              <th>最近握手</th>
+              <th>传输流量 (下行 / 上行)</th>
+              <th>端点 (Endpoint)</th>
+              <th>公钥</th>
+            </tr>
+          </thead>
+          <tbody id="clients-table-body">
+            <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_HEADER = { 'X-Requested-With': 'wg-panel', 'Content-Type': 'application/json' };
+
+    async function api(url, options = {}) {
+      options.headers = Object.assign({}, API_HEADER, options.headers || {});
+      const res = await fetch(url, options);
+      if (res.status === 401) {
+        showLogin();
+        throw new Error('未授权');
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error?.message || '请求失败');
+      }
+      return data;
+    }
+
+    function showLogin() {
+      document.getElementById('login-view').classList.remove('hidden');
+      document.getElementById('dashboard-view').classList.add('hidden');
+    }
+
+    function showDashboard() {
+      document.getElementById('login-view').classList.add('hidden');
+      document.getElementById('dashboard-view').classList.remove('hidden');
+      loadDashboard();
+    }
+
+    async function checkSession() {
+      try {
+        const res = await api('/api/session', { method: 'GET' });
+        if (res.authenticated) {
+          if (res.mustChangePassword) {
+            showDashboard();
+            openPasswordModal(true);
+          } else {
+            showDashboard();
+          }
+        } else {
+          showLogin();
+        }
+      } catch {
+        showLogin();
+      }
+    }
+
+    async function loadDashboard() {
+      try {
+        const [server, clients, liveStatus, version] = await Promise.all([
+          api('/api/server'),
+          api('/api/clients'),
+          api('/api/status').catch(() => null),
+          api('/api/version').catch(() => null)
+        ]);
+
+        if (version && version.version) {
+          document.getElementById('version-badge').textContent = 'v' + version.version;
+        }
+
+        document.getElementById('srv-endpoint').textContent = server.endpoint || '(未设置)';
+        document.getElementById('srv-port').textContent = server.listenPort || '-';
+        document.getElementById('srv-subnet4').textContent = server.subnetV4 || '-';
+        document.getElementById('srv-subnet6').textContent = server.subnetV6 || '(未启用)';
+        document.getElementById('srv-mtu').textContent = server.mtu ? server.mtu : '1420 (默认)';
+        document.getElementById('srv-firewall').textContent = server.firewallBackend || 'iptables';
+
+        if (liveStatus && liveStatus.allNeverHandshake && clients.length > 0) {
+          document.getElementById('firewall-warning').classList.remove('hidden');
+        } else {
+          document.getElementById('firewall-warning').classList.add('hidden');
+        }
+
+        renderClients(clients, liveStatus);
+      } catch (err) {
+        console.error('加载面板失败', err);
+      }
+    }
+
+    function renderClients(clients, liveStatus) {
+      document.getElementById('clients-count').textContent = clients.length;
+      const tbody = document.getElementById('clients-table-body');
+      if (clients.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">暂无客户端</td></tr>';
+        return;
+      }
+
+      const statusMap = {};
+      if (liveStatus && liveStatus.peers) {
+        for (const p of liveStatus.peers) {
+          statusMap[p.publicKey] = p;
+        }
+      }
+
+      tbody.innerHTML = clients.map(c => {
+        const p = statusMap[c.publicKey] || {};
+        const isOnline = p.hasHandshook;
+        const statusHtml = isOnline
+          ? '<span class="status-dot status-online"></span>在线'
+          : '<span class="status-dot status-offline"></span>离线';
+        const handshake = p.latestHandshake || '(从未连接)';
+        const traffic = p.transferRx ? (p.transferRx + ' / ' + p.transferTx) : '-';
+        const ep = p.endpoint || '-';
+
+        return `<tr>
+          <td><strong>${escapeHtml(c.name)}</strong></td>
+          <td>${escapeHtml(c.ipV4)}${c.ipV6 ? '<br><small style="color:var(--text-muted);">' + escapeHtml(c.ipV6) + '</small>' : ''}</td>
+          <td>${statusHtml}</td>
+          <td>${escapeHtml(handshake)}</td>
+          <td>${escapeHtml(traffic)}</td>
+          <td><small>${escapeHtml(ep)}</small></td>
+          <td><span class="peer-key" title="${escapeHtml(c.publicKey)}">${escapeHtml(c.publicKey.slice(0, 10))}...</span></td>
+        </tr>`;
+      }).join('');
+    }
+
+    function escapeHtml(s) {
+      if (!s) return '';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function openPasswordModal(force) {
+      const modal = document.getElementById('pwd-modal');
+      const cancelBtn = document.getElementById('pwd-cancel-btn');
+      const notice = document.getElementById('pwd-notice');
+      modal.classList.remove('hidden');
+      if (force) {
+        cancelBtn.classList.add('hidden');
+        notice.classList.remove('hidden');
+      } else {
+        cancelBtn.classList.remove('hidden');
+        notice.classList.add('hidden');
+      }
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errBox = document.getElementById('login-error');
+      errBox.classList.add('hidden');
+      try {
+        const res = await api('/api/login', {
+          method: 'POST',
+          body: JSON.stringify({
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value
+          })
+        });
+        if (res.mustChangePassword) {
+          showDashboard();
+          openPasswordModal(true);
+        } else {
+          showDashboard();
+        }
+      } catch (err) {
+        errBox.textContent = err.message;
+        errBox.classList.remove('hidden');
+      }
+    });
+
+    document.getElementById('pwd-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errBox = document.getElementById('pwd-error');
+      errBox.classList.add('hidden');
+      try {
+        await api('/api/password', {
+          method: 'PUT',
+          body: JSON.stringify({
+            oldPassword: document.getElementById('old-pwd').value,
+            newPassword: document.getElementById('new-pwd').value
+          })
+        });
+        document.getElementById('pwd-modal').classList.add('hidden');
+        alert('密码修改成功！');
+        loadDashboard();
+      } catch (err) {
+        errBox.textContent = err.message;
+        errBox.classList.remove('hidden');
+      }
+    });
+
+    document.getElementById('pwd-cancel-btn').addEventListener('click', () => {
+      document.getElementById('pwd-modal').classList.add('hidden');
+    });
+
+    document.getElementById('change-pwd-btn').addEventListener('click', () => {
+      openPasswordModal(false);
+    });
+
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      await api('/api/logout', { method: 'POST' }).catch(() => {});
+      showLogin();
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', loadDashboard);
+
+    checkSession();
+  </script>
+</body>
+</html>

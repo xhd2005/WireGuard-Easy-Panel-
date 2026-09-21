@@ -15,39 +15,48 @@ GO_VER="${GO_VER:-1.23.4}"
 REMOTE="/tmp/wgpanel-test.$$"
 LOCAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# 依次尝试：腾讯云内网源 -> 谷歌中国镜像 -> 官方源。大陆机器上前两个才有实用速度。
+# 优先使用国内与腾讯云可用镜像
 GO_URLS=(
-  "https://mirrors.tencentyun.com/go/go${GO_VER}.linux-amd64.tar.gz"
   "https://golang.google.cn/dl/go${GO_VER}.linux-amd64.tar.gz"
   "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz"
 )
 
 echo "==> 打包 panel/ 与 fixtures/"
-tar czf - -C "$LOCAL_ROOT" panel fixtures | ssh "$WG_TEST_HOST" "mkdir -p $REMOTE && tar xzf - && cat > /dev/null"
+tar czf - -C "$LOCAL_ROOT" panel fixtures | ssh "$WG_TEST_HOST" "mkdir -p $REMOTE && tar xzf - -C $REMOTE"
 
-echo "==> 上传并准备 Go ${GO_VER} 到 $REMOTE/go（若已存在则复用）"
+echo "==> 上传并准备 Go ${GO_VER} 到 $REMOTE/go（缓存于 /tmp/go-dist-${GO_VER}）"
 {
   printf '%s\n' "set -uo pipefail"
   printf 'cd %s\n' "$REMOTE"
-  printf 'if [ ! -x go/bin/go ]; then\n'
-  printf '  mkdir -p gotmp\n'
+  printf 'CACHED_GO=/tmp/go-dist-%s\n' "$GO_VER"
+  printf 'if [ ! -x "$CACHED_GO/bin/go" ]; then\n'
+  printf '  mkdir -p /tmp/gotmp-$$\n'
   printf '  ok=0\n'
   for u in "${GO_URLS[@]}"; do
-    printf '  [ $ok = 1 ] || { echo "   尝试 %s"; timeout 180 curl -fsSL -o gotmp/go.tgz "%s" && [ -s gotmp/go.tgz ] && ok=1; }\n' "$u" "$u"
+    printf '  [ $ok = 1 ] || { echo "   尝试 %s"; timeout 180 curl -fsSL -o /tmp/gotmp-$$/go.tgz "%s" && [ -s /tmp/gotmp-$$/go.tgz ] && ok=1; }\n' "$u" "$u"
   done
-  printf '  [ $ok = 1 ] || { echo "❌ 所有 Go 下载源都失败；请在能联网的机器上备好 %s/go 再重跑" ; exit 1; }\n' "$REMOTE"
-  printf '  tar xzf gotmp/go.tgz -C gotmp && mv gotmp/go go && rm -rf gotmp\n'
+  printf '  [ $ok = 1 ] || { echo "❌ 所有 Go 下载源都失败；请在能联网的机器上备好 $CACHED_GO/bin/go 再重跑" ; exit 1; }\n'
+  printf '  tar xzf /tmp/gotmp-$$/go.tgz -C /tmp/gotmp-$$\n'
+  printf '  rm -rf "$CACHED_GO"\n'
+  printf '  mv /tmp/gotmp-$$/go "$CACHED_GO"\n'
+  printf '  rm -rf /tmp/gotmp-$$\n'
   printf 'fi\n'
+  printf 'ln -sf "$CACHED_GO" go\n'
   printf 'go/bin/go version\n'
 } | ssh "$WG_TEST_HOST" "bash -s"
 
-echo "==> go vet + go test"
+echo "==> go vet + go test + build"
 ssh "$WG_TEST_HOST" "cd $REMOTE/panel \
-  && export HOME=$REMOTE GOCACHE=$REMOTE/.gocache GOPATH=$REMOTE/.gopath GOTOOLCHAIN=local CGO_ENABLED=0 GOFLAGS=-mod=mod \
+  && export HOME=$REMOTE GOCACHE=$REMOTE/.gocache GOPATH=$REMOTE/.gopath GOTOOLCHAIN=local CGO_ENABLED=0 GOPROXY=https://goproxy.cn,direct \
+  && ../go/bin/go mod tidy \
   && ../go/bin/go vet ./... \
   && ../go/bin/go test ./... -count=1 -v \
-  && ../go/bin/go test ./... -count=1 -cover"
+  && ../go/bin/go test ./... -count=1 -cover \
+  && ../go/bin/go build -v -o $REMOTE/wg-panel ."
+
+echo "==> 同步 go.sum 回本地"
+ssh "$WG_TEST_HOST" "cat $REMOTE/panel/go.sum" > "$LOCAL_ROOT/panel/go.sum"
 
 echo "==> 清理远端临时目录"
-ssh "$WG_TEST_HOST" "rm -rf $REMOTE"
+ssh "$WG_TEST_HOST" "chmod -R u+w $REMOTE 2>/dev/null || true; rm -rf $REMOTE"
 echo "✅ 完成"

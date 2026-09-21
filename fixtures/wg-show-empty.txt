@@ -1,0 +1,4 @@
+interface: wg0
+  public key: rXMT3K0AM9I5B7D/S5f/HaLaUP7yVyZdQRFfRuenlRE=
+  private key: (hidden)
+  listening port: 53

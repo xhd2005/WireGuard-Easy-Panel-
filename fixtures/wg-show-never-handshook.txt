@@ -1,0 +1,11 @@
+interface: wg0
+  public key: rXMT3K0AM9I5B7D/S5f/HaLaUP7yVyZdQRFfRuenlRE=
+  private key: (hidden)
+  listening port: 53
+
+peer: mUuGofDVp+yBuo7u6SgGRRfYOao597gC9U8pSXu7BXw=
+  preshared key: (hidden)
+  endpoint: (none)
+  allowed ips: 10.7.0.2/32
+  latest handshake: (never)
+  transfer: 0 B received, 0 B sent
