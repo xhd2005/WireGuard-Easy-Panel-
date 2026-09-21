@@ -28,6 +28,14 @@ type PeerStatus struct {
 	TransferTx      string   `json:"transferTx"`
 	TransferRxBytes int64    `json:"transferRxBytes"`
 	TransferTxBytes int64    `json:"transferTxBytes"`
+	RxSpeed         string   `json:"rxSpeed,omitempty"`    // 瞬时下行速率，如 "1.2 MB/s"
+	TxSpeed         string   `json:"txSpeed,omitempty"`    // 瞬时上行速率，如 "340 KB/s"
+	RxSpeedBytes    int64    `json:"rxSpeedBytes,omitempty"`
+	TxSpeedBytes    int64    `json:"txSpeedBytes,omitempty"`
+	TotalRx         string   `json:"totalRx,omitempty"`    // 历史持久化累计下行流量
+	TotalTx         string   `json:"totalTx,omitempty"`    // 历史持久化累计上行流量
+	TotalRxBytes    int64    `json:"totalRxBytes,omitempty"`
+	TotalTxBytes    int64    `json:"totalTxBytes,omitempty"`
 }
 
 // ParseShow 解析 `wg show` 输出（支持人类可读格式以及 tab 分隔的 dump 格式）。

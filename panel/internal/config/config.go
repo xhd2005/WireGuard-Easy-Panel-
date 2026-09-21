@@ -10,6 +10,7 @@ type Config struct {
 	WGInterface     string // WireGuard 接口名，默认 "wg0"
 	CredentialsPath string // 登录凭据路径，默认 "/etc/wg-panel/credentials.json"
 	StatePath       string // 运行时状态（如 endpointDirty），默认 "/var/lib/wg-panel/state.json"
+	TrafficPath     string // 历史累计流量持久化存储路径，默认 "/var/lib/wg-panel/traffic.json"
 	BackupDir       string // 每次改动配置前的备份目录，默认 "/var/backups/wg-panel"
 	Version         string // 编译期注入的版本号
 	Commit          string // 编译期注入的 Git Commit
@@ -25,6 +26,7 @@ func Default() *Config {
 		WGInterface:     "wg0",
 		CredentialsPath: "/etc/wg-panel/credentials.json",
 		StatePath:       "/var/lib/wg-panel/state.json",
+		TrafficPath:     "/var/lib/wg-panel/traffic.json",
 		BackupDir:       "/var/backups/wg-panel",
 		Version:         "0.1.0",
 		Commit:          "dev",

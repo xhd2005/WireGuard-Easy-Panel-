@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/xaxanb/wg/panel/internal/qr"
 	"github.com/xaxanb/wg/panel/internal/status"
 	"github.com/xaxanb/wg/panel/internal/system"
+	"github.com/xaxanb/wg/panel/internal/traffic"
 	"github.com/xaxanb/wg/panel/internal/wgconf"
 )
 
@@ -84,6 +86,7 @@ type Server struct {
 	auth    *auth.Manager
 	reader  SystemReader
 	applier apply.Applier
+	tracker *traffic.Tracker
 	webFS   fs.FS
 	mux     *http.ServeMux
 }
@@ -96,16 +99,39 @@ func NewServer(cfg *config.Config, authMgr *auth.Manager, reader SystemReader, a
 	if applier == nil {
 		applier = apply.NewRealApplier(cfg.WGConfPath, cfg.WGInterface, cfg.BackupDir, filepath.Dir(cfg.StatePath))
 	}
+	if cfg.TrafficPath == "" {
+		cfg.TrafficPath = filepath.Join(filepath.Dir(cfg.StatePath), "traffic.json")
+	}
+	tracker := traffic.NewTracker(cfg.TrafficPath)
 	s := &Server{
 		cfg:     cfg,
 		auth:    authMgr,
 		reader:  reader,
 		applier: applier,
+		tracker: tracker,
 		webFS:   webFS,
 		mux:     http.NewServeMux(),
 	}
 	s.registerRoutes()
+	s.startBackgroundTracker()
 	return s
+}
+
+func (s *Server) startBackgroundTracker() {
+	ticker := time.NewTicker(2 * time.Second)
+	go func() {
+		for range ticker.C {
+			raw, err := s.reader.ReadWGShow()
+			if err != nil {
+				continue
+			}
+			st, err := status.ParseShow(raw)
+			if err != nil {
+				continue
+			}
+			s.tracker.Record(st.Peers)
+		}
+	}()
 }
 
 func (s *Server) Handler() http.Handler {
@@ -317,10 +343,21 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 
 	backend := s.reader.DetectFirewallBackend()
 
+	portsMap := map[int]bool{srv.ListenPort: true, 53: true, 123: true, 443: true, 8443: true, 1194: true}
+	var ports []int
+	for _, p := range []int{srv.ListenPort, 53, 123, 443, 8443, 1194} {
+		if portsMap[p] {
+			ports = append(ports, p)
+			delete(portsMap, p)
+		}
+	}
+
 	s.jsonResponse(w, http.StatusOK, map[string]any{
 		"installed":       true,
 		"endpoint":        srv.Endpoint,
 		"listenPort":      srv.ListenPort,
+		"multiPorts":      ports,
+		"tcpmssClamping":  true,
 		"mtu":             srv.MTU,
 		"subnetV4":        subnetV4,
 		"subnetV6":        subnetV6,
@@ -393,6 +430,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.jsonError(w, http.StatusInternalServerError, "parse_status_failed", err.Error())
 		return
+	}
+
+	if s.tracker != nil {
+		st.Peers = s.tracker.Enrich(st.Peers)
 	}
 
 	s.jsonResponse(w, http.StatusOK, st)
@@ -688,7 +729,8 @@ func (s *Server) handleGetClientConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mode := r.URL.Query().Get("mode")
-	conf = adjustRouteMode(conf, mode)
+	port, _ := strconv.Atoi(r.URL.Query().Get("port"))
+	conf = adjustConfig(conf, mode, port)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".conf"))
@@ -705,7 +747,8 @@ func (s *Server) handleGetClientQR(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mode := r.URL.Query().Get("mode")
-	conf = adjustRouteMode(conf, mode)
+	port, _ := strconv.Atoi(r.URL.Query().Get("port"))
+	conf = adjustConfig(conf, mode, port)
 
 	png, err := qr.GeneratePNG(conf, 320)
 	if err != nil {
@@ -850,6 +893,32 @@ func (s *Server) handleSystemStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.jsonResponse(w, http.StatusOK, st)
+}
+
+func adjustConfig(conf, mode string, port int) string {
+	if mode == "split" {
+		conf = adjustRouteMode(conf, mode)
+	}
+	if port > 0 && port <= 65535 {
+		var lines []string
+		for _, line := range strings.Split(conf, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "Endpoint") {
+				parts := strings.SplitN(trimmed, "=", 2)
+				if len(parts) == 2 {
+					ep := strings.TrimSpace(parts[1])
+					host, _, err := net.SplitHostPort(ep)
+					if err == nil {
+						lines = append(lines, fmt.Sprintf("Endpoint = %s:%d", host, port))
+						continue
+					}
+				}
+			}
+			lines = append(lines, line)
+		}
+		return strings.Join(lines, "\n")
+	}
+	return conf
 }
 
 func adjustRouteMode(conf, mode string) string {

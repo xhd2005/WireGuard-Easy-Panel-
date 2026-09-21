@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  wg-panel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xhd2005/wg-panel:latest
+    container_name: wg-panel
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    # 推荐使用 host 网络模式，确保 WireGuard UDP 报文与 iptables 路由无额外 Docker 桥接开销
+    network_mode: host
+    environment:
+      - TZ=Asia/Shanghai
+      - WG_PANEL_RUNTIME=docker
+    volumes:
+      # WireGuard 核心配置持久化
+      - ./data/wireguard:/etc/wireguard
+      # 管理面板账号凭据与会话
+      - ./data/panel:/etc/wg-panel
+      # 状态与历史累计流量数据
+      - ./data/state:/var/lib/wg-panel
+      # 配置文件历史备份
+      - ./data/backups:/var/backups/wg-panel
+      # 宿主机内核模块挂载 (加载 wireguard 内核态)
+      - /lib/modules:/lib/modules:ro

@@ -919,15 +919,27 @@ create_firewall_rules() {
     firewall-cmd -q --zone=trusted --add-source=10.7.0.0/24
     firewall-cmd -q --permanent --add-port="$port"/udp
     firewall-cmd -q --permanent --zone=trusted --add-source=10.7.0.0/24
+    # 放行外部多端口池并重定向至WireGuard端口 (53/123/443/8443/1194)
+    for p in 53 123 443 8443 1194; do
+      firewall-cmd -q --add-port="$p"/udp
+      firewall-cmd -q --permanent --add-port="$p"/udp
+    done
+    firewall-cmd -q --direct --add-rule ipv4 nat PREROUTING 0 ! -i wg0 ! -i lo -p udp -m multiport --dports 53,123,443,8443,1194 -j REDIRECT --to-ports "$port"
+    firewall-cmd -q --permanent --direct --add-rule ipv4 nat PREROUTING 0 ! -i wg0 ! -i lo -p udp -m multiport --dports 53,123,443,8443,1194 -j REDIRECT --to-ports "$port"
     # 为VPN子网配置NAT转发（IPv4）
     firewall-cmd -q --direct --add-rule ipv4 nat POSTROUTING 0 -s 10.7.0.0/24 ! -d 10.7.0.0/24 -j MASQUERADE
     firewall-cmd -q --permanent --direct --add-rule ipv4 nat POSTROUTING 0 -s 10.7.0.0/24 ! -d 10.7.0.0/24 -j MASQUERADE
+    # TCPMSS Clamping 防止PMTUD黑洞大包死锁
+    firewall-cmd -q --direct --add-rule ipv4 mangle FORWARD 0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    firewall-cmd -q --permanent --direct --add-rule ipv4 mangle FORWARD 0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     # 若支持IPv6，配置IPv6防火墙规则
     if [[ -n "$ip6" ]]; then
       firewall-cmd -q --zone=trusted --add-source=fddd:2c4:2c4:2c4::/64
       firewall-cmd -q --permanent --zone=trusted --add-source=fddd:2c4:2c4:2c4::/64
       firewall-cmd -q --direct --add-rule ipv6 nat POSTROUTING 0 -s fddd:2c4:2c4:2c4::/64 ! -d fddd:2c4:2c4:2c4::/64 -j MASQUERADE
       firewall-cmd -q --permanent --direct --add-rule ipv6 nat POSTROUTING 0 -s fddd:2c4:2c4:2c4::/64 ! -d fddd:2c4:2c4:2c4::/64 -j MASQUERADE
+      firewall-cmd -q --direct --add-rule ipv6 mangle FORWARD 0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+      firewall-cmd -q --permanent --direct --add-rule ipv6 mangle FORWARD 0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     fi
   else
     # 使用iptables配置规则（创建系统服务确保规则持久化）
@@ -938,6 +950,8 @@ create_firewall_rules() {
       iptables_path=$(command -v iptables-legacy)
       ip6tables_path=$(command -v ip6tables-legacy)
     fi
+    wan_nic=$(ip -4 route show default 2>/dev/null | awk '{print $5; exit}')
+    [ -n "$wan_nic" ] || wan_nic="eth0"
     # 创建wg-iptables服务配置文件
     echo "[Unit]
 After=network-online.target
@@ -946,18 +960,28 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=$iptables_path -w 5 -t nat -A POSTROUTING -s 10.7.0.0/24 ! -d 10.7.0.0/24 -j MASQUERADE
 ExecStart=$iptables_path -w 5 -I INPUT -p udp --dport $port -j ACCEPT
+ExecStart=$iptables_path -w 5 -I INPUT -p udp -m multiport --dports 53,123,443,8443,1194 -j ACCEPT
+ExecStart=$iptables_path -w 5 -t nat -A PREROUTING -i $wan_nic -p udp -m multiport --dports 53,123,443,8443,1194 -j REDIRECT --to-ports $port
+ExecStart=$iptables_path -w 5 -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 ExecStart=$iptables_path -w 5 -I FORWARD -s 10.7.0.0/24 -j ACCEPT
 ExecStart=$iptables_path -w 5 -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
 ExecStop=$iptables_path -w 5 -t nat -D POSTROUTING -s 10.7.0.0/24 ! -d 10.7.0.0/24 -j MASQUERADE
 ExecStop=$iptables_path -w 5 -D INPUT -p udp --dport $port -j ACCEPT
+ExecStop=$iptables_path -w 5 -D INPUT -p udp -m multiport --dports 53,123,443,8443,1194 -j ACCEPT
+ExecStop=$iptables_path -w 5 -t nat -D PREROUTING -i $wan_nic -p udp -m multiport --dports 53,123,443,8443,1194 -j REDIRECT --to-ports $port
+ExecStop=$iptables_path -w 5 -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 ExecStop=$iptables_path -w 5 -D FORWARD -s 10.7.0.0/24 -j ACCEPT
 ExecStop=$iptables_path -w 5 -D FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT" >/etc/systemd/system/wg-iptables.service
     # 若支持IPv6，添加IPv6 iptables规则
     if [[ -n "$ip6" ]]; then
       echo "ExecStart=$ip6tables_path -w 5 -t nat -A POSTROUTING -s fddd:2c4:2c4:2c4::/64 ! -d fddd:2c4:2c4:2c4::/64 -j MASQUERADE
+ExecStart=$ip6tables_path -w 5 -t nat -A PREROUTING -i $wan_nic -p udp -m multiport --dports 53,123,443,8443,1194 -j REDIRECT --to-ports $port
+ExecStart=$ip6tables_path -w 5 -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 ExecStart=$ip6tables_path -w 5 -I FORWARD -s fddd:2c4:2c4:2c4::/64 -j ACCEPT
 ExecStart=$ip6tables_path -w 5 -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
 ExecStop=$ip6tables_path -w 5 -t nat -D POSTROUTING -s fddd:2c4:2c4:2c4::/64 ! -d fddd:2c4:2c4:2c4::/64 -j MASQUERADE
+ExecStop=$ip6tables_path -w 5 -t nat -D PREROUTING -i $wan_nic -p udp -m multiport --dports 53,123,443,8443,1194 -j REDIRECT --to-ports $port
+ExecStop=$ip6tables_path -w 5 -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 ExecStop=$ip6tables_path -w 5 -D FORWARD -s fddd:2c4:2c4:2c4::/64 -j ACCEPT
 ExecStop=$ip6tables_path -w 5 -D FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT" >>/etc/systemd/system/wg-iptables.service
     fi

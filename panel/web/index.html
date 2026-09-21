@@ -486,9 +486,22 @@
         <button type="button" class="mode-btn active" id="mode-full-btn">🌐 全局代理模式 (0.0.0.0/0)</button>
         <button type="button" class="mode-btn" id="mode-split-btn">🔀 内网分流模式 (仅组网子网)</button>
       </div>
-      <p id="mode-desc" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1rem; text-align: left;">
+      <p id="mode-desc" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem; text-align: left;">
         <strong>全局模式</strong>：所有上网流量经本服务器中转；若服务器带宽有限，看视频下载可能会受限。
       </p>
+
+      <!-- 接入端口选择器 (多端口重定向支持) -->
+      <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; text-align: left; background: rgba(255,255,255,0.03); padding: 0.4rem 0.75rem; border-radius: 6px; border: 1px solid var(--card-border);">
+        <label style="font-size: 0.76rem; color: var(--text-muted); white-space: nowrap;">接入端口 (按网络自选):</label>
+        <select id="qr-port-select" class="form-control" style="font-size: 0.76rem; padding: 0.25rem 0.5rem; width: auto; flex: 1;">
+          <option value="">默认服务器监听端口</option>
+          <option value="53">UDP 53 (DNS 最强穿透 / 校园网认证前免流)</option>
+          <option value="123">UDP 123 (NTP 时间协议 / 企业防火墙普遍放行)</option>
+          <option value="443">UDP 443 (HTTPS/QUIC / 运营商最高 QoS 优先级)</option>
+          <option value="8443">UDP 8443 (Alt-HTTPS / 高位备用无冲突)</option>
+          <option value="1194">UDP 1194 (OpenVPN 经典 VPN 端口)</option>
+        </select>
+      </div>
 
       <div style="margin: 0.5rem 0 1rem; display: inline-block; background: #fff; padding: 10px; border-radius: 8px;">
         <img id="qr-image" src="" alt="WireGuard QR Code" style="display: block; width: 220px; height: 220px;">
@@ -669,6 +682,8 @@
       <div class="grid">
         <div class="info-item"><label>公网通信端点</label><span id="srv-endpoint">-</span></div>
         <div class="info-item"><label>UDP 监听端口</label><span id="srv-port">-</span></div>
+        <div class="info-item"><label>多端口接入 (Multi-Port)</label><span id="srv-multiports" style="color:var(--success); font-size:0.88rem;">53, 123, 443, 8443, 1194</span></div>
+        <div class="info-item"><label>TCPMSS 优化</label><span id="srv-tcpmss" style="color:#38bdf8; font-size:0.88rem;">已开启 (抗 PMTUD 黑洞)</span></div>
         <div class="info-item"><label>IPv4 组网网段</label><span id="srv-subnet4">-</span></div>
         <div class="info-item"><label>IPv6 组网网段</label><span id="srv-subnet6">-</span></div>
         <div class="info-item"><label>MTU 限制</label><span id="srv-mtu">-</span></div>
@@ -751,6 +766,7 @@
     }
 
     function showLogin() {
+      if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
       document.getElementById('login-view').classList.remove('hidden');
       document.getElementById('dashboard-view').classList.add('hidden');
     }
@@ -759,6 +775,14 @@
       document.getElementById('login-view').classList.add('hidden');
       document.getElementById('dashboard-view').classList.remove('hidden');
       loadDashboard();
+      if (!autoRefreshTimer) {
+        autoRefreshTimer = setInterval(() => {
+          const db = document.getElementById('dashboard-view');
+          if (db && !db.classList.contains('hidden')) {
+            loadDashboard(true);
+          }
+        }, 3000);
+      }
     }
 
     async function checkSession() {
@@ -784,10 +808,11 @@
     let rawLiveStatus = null;
     let activeFilter = 'all';
     let activeSearch = '';
+    let autoRefreshTimer = null;
 
-    async function loadDashboard() {
+    async function loadDashboard(silent = false) {
       const icon = document.getElementById('refresh-icon');
-      if (icon) icon.style.animation = 'spin 0.6s linear infinite';
+      if (icon && !silent) icon.style.animation = 'spin 0.6s linear infinite';
 
       try {
         const [server, clients, liveStatus, version, redist, sysStats] = await Promise.all([
@@ -917,8 +942,20 @@
         }
 
         const handshake = p.latestHandshake || '(从未连接)';
-        const traffic = p.transferRx ? `${p.transferRx} / ${p.transferTx}` : '-';
         const ep = p.endpoint || '-';
+
+        const rxSpeed = p.rxSpeed || '0 B/s';
+        const txSpeed = p.txSpeed || '0 B/s';
+        const totalRx = p.totalRx || p.transferRx || '0 B';
+        const totalTx = p.totalTx || p.transferTx || '0 B';
+        const isTrafficActive = (p.rxSpeedBytes > 1024) || (p.txSpeedBytes > 1024);
+        const speedBadge = isTrafficActive
+          ? `<span style="color:var(--success); font-weight:600;">↓ ${escapeHtml(rxSpeed)}</span> <span style="color:#38bdf8; font-weight:600;">↑ ${escapeHtml(txSpeed)}</span>`
+          : `<span style="color:var(--text-muted); font-size:0.75rem;">↓ ${escapeHtml(rxSpeed)} ↑ ${escapeHtml(txSpeed)}</span>`;
+
+        const trafficCell = p.transferRx
+          ? `<div>${speedBadge}</div><div style="font-size:0.75rem; color:var(--text-sub); margin-top:2px;" title="历史累计接收 / 发送">${escapeHtml(totalRx)} / ${escapeHtml(totalTx)}</div>`
+          : `<span style="color:var(--text-muted);">-</span>`;
 
         const toggleActionBtn = c.disabled
           ? `<button onclick="enableClient('${escapeHtml(c.name)}')" class="btn btn-sm btn-secondary" title="启用连接">启用</button>`
@@ -929,7 +966,7 @@
           <td data-label="虚拟 IP">${escapeHtml(c.ipV4)}${c.ipV6 ? '<br><small style="color:var(--text-sub);">' + escapeHtml(c.ipV6) + '</small>' : ''}</td>
           <td data-label="状态">${statusHtml}</td>
           <td data-label="握手"><small>${escapeHtml(handshake)}</small></td>
-          <td data-label="流量"><small>${escapeHtml(traffic)}</small></td>
+          <td data-label="流量">${trafficCell}</td>
           <td data-label="对端"><small>${escapeHtml(ep)}</small></td>
           <td data-label="公钥"><span class="peer-key" title="${escapeHtml(c.publicKey)}">${escapeHtml(c.publicKey.slice(0, 8))}...</span></td>
           <td data-label="操作" class="actions-cell">
@@ -964,10 +1001,14 @@
 
     let activeModalClient = '';
     let activeModalMode = 'full';
+    let activeModalPort = '';
 
     async function openClientDetail(name) {
       activeModalClient = name;
       activeModalMode = 'full';
+      activeModalPort = '';
+      const portSel = document.getElementById('qr-port-select');
+      if (portSel) portSel.value = '';
       updateModalModeUI();
       await fetchAndDisplayClientConfig();
       document.getElementById('client-qr-modal').classList.remove('hidden');
@@ -976,17 +1017,24 @@
     async function fetchAndDisplayClientConfig() {
       const name = activeModalClient;
       const mode = activeModalMode;
+      const port = activeModalPort;
+      let url = `/api/clients/${encodeURIComponent(name)}/config?mode=${mode}`;
+      let qrUrl = `/api/clients/${encodeURIComponent(name)}/qr.png?mode=${mode}&t=${Date.now()}`;
+      if (port) {
+        url += `&port=${encodeURIComponent(port)}`;
+        qrUrl += `&port=${encodeURIComponent(port)}`;
+      }
       try {
-        const res = await fetch(`/api/clients/${encodeURIComponent(name)}/config?mode=${mode}`, { headers: API_HEADER });
+        const res = await fetch(url, { headers: API_HEADER });
         if (!res.ok) throw new Error('读取客户端配置失败');
         const confText = await res.text();
-        document.getElementById('qr-modal-title').textContent = `客户端: ${name}`;
-        document.getElementById('qr-image').src = `/api/clients/${encodeURIComponent(name)}/qr.png?mode=${mode}&t=${Date.now()}`;
+        document.getElementById('qr-modal-title').textContent = `客户端: ${name}${port ? ' (端口 ' + port + ')' : ''}`;
+        document.getElementById('qr-image').src = qrUrl;
         document.getElementById('conf-preview').textContent = confText;
 
         const dlBtn = document.getElementById('download-conf-btn');
         dlBtn.href = `data:text/plain;charset=utf-8,${encodeURIComponent(confText)}`;
-        dlBtn.download = `${name}-${mode}.conf`;
+        dlBtn.download = `${name}-${mode}${port ? '-p' + port : ''}.conf`;
       } catch (err) {
         showToast(err.message, 'error');
       }
@@ -1016,6 +1064,11 @@
     document.getElementById('mode-split-btn').onclick = async () => {
       activeModalMode = 'split';
       updateModalModeUI();
+      await fetchAndDisplayClientConfig();
+    };
+
+    document.getElementById('qr-port-select').onchange = async (e) => {
+      activeModalPort = e.target.value;
       await fetchAndDisplayClientConfig();
     };
 

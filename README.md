@@ -23,6 +23,10 @@
   - **100% 纯内联原生矢量图标与内嵌样式**，无任何 Google Fonts、Bootstrap 或 unpkg/cdnjs 外部网络依赖，局域网与离线断网环境 0ms 闪烁顺畅秒开。
 - ⚡ **零停机热重载 (Zero-Downtime Hot Reload)**：
   - 增删客户端、更换密钥或启停对端时，底层采用 `wg syncconf` 精确增量热重载，**存量连接零中断、不丢包、不重启网络接口**。
+- 🌐 **多端口并发复用 (Multi-Port REDIRECT)**：
+  - 单一 WireGuard 接口通过 iptables 动态复用技术，**同时支持 53 (DNS)、123 (NTP)、443 (QUIC)、8443 (Alt-HTTPS)、1194 以及原生 51820 接入**，客户端在配置弹窗中可自由切换端口，突破校园网认证与企业严格防火墙。
+- 📈 **流量持久化统计与实时瞬时网速 (Traffic Accounting & Live Metering)**：
+  - 后台每 2 秒高频差值采样计算每个 Peer 的实时上传/下载速率（`↓ 1.2 MB/s ↑ 340 KB/s`），自动累加持久化保存（即使重启服务器或重载网卡，累计流量永不丢失）。
 - 🔀 **智能内网分流 / 全局代理一键切换 (Split vs Full Tunnel)**：
   - 支持一键切换客户端配置文件为 **分流模式**（仅组网内网走隧道，日常上网直通本地千兆宽带，不挤占云主机小带宽）或 **全局代理模式**（全部流量走隧道出口）。
 - 🛑 **Peer 一键停用 / 恢复 (Disable & Enable)**：
@@ -33,6 +37,8 @@
   - 任何变更前自动在 `/var/backups/wg-panel` 保存历史快照（最多保留 20 份），支持控制台查看历史版本并一键安全回滚，自带防语法破坏与路径穿越校验。
 - 📊 **主机系统资源与健康监控**：
   - 纯 Go 原生采集 Linux `/proc` 数据，实时呈现 CPU 使用率、1/5/15min 负载、内存/磁盘占用百分比进度条与系统开机时长。
+- 🐳 **原生 Docker 容器化支持**：
+  - 提供开箱即用的多阶段构建 `Dockerfile` 与 `docker-compose.yml`，解耦 systemd 强依赖，群晖 NAS、轻量容器与边缘设备一键拉起。
 - 📱 **多端全平台一键导入**：
   - 针对手机端提供高清二维码即时扫码导入，针对电脑端提供标准 `.conf` 一键下载与代码复制；支持打包下载全部客户端配置 (`export.zip`)。
 - 🔒 **严格的安全边界与私钥保护**：
@@ -101,7 +107,24 @@ curl -fsSL https://raw.githubusercontent.com/xhd2005/WireGuard-Easy-Panel-/main/
 
 ---
 
-### 2. 安全访问面板
+### 2. Docker / Docker Compose 容器化部署
+
+若更习惯使用 Docker 或在 NAS（如群晖、威联通）上部署：
+
+```bash
+# 1. 下载 docker-compose 配置文件
+curl -fsSL -O https://raw.githubusercontent.com/xhd2005/WireGuard-Easy-Panel-/main/docker-compose.yml
+
+# 2. 一键启动容器
+docker compose up -d
+
+# 3. 查看初始密码
+docker compose logs wg-panel | grep "密  码"
+```
+
+---
+
+### 3. 安全访问面板
 
 出于安全考虑（面板拥有最高 `root` 系统网络权限），**外部公网默认无法直接访问面板端口**。你可以通过以下两种最推荐的方式访问：
 

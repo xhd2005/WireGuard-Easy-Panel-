@@ -256,7 +256,27 @@ func (a *RealApplier) SyncConf() error {
 	return nil
 }
 
+func isContainerOrNoSystemd() bool {
+	if os.Getenv("WG_PANEL_RUNTIME") == "docker" {
+		return true
+	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return true
+	}
+	return false
+}
+
 func (a *RealApplier) RestartService(name string) error {
+	// 如果处于容器或无 systemd 环境，优雅降级为直接内核/命令行操作，避免因缺 systemctl 崩溃
+	if isContainerOrNoSystemd() {
+		if strings.HasPrefix(name, "wg-quick@") {
+			return a.SyncConf()
+		}
+		return nil
+	}
 	out, err := exec.Command("systemctl", "restart", name).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("apply: 重启服务 %s 失败: %w (%s)", name, err, strings.TrimSpace(string(out)))

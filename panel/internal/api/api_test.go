@@ -374,6 +374,19 @@ func TestPhase4AddClientDownloadConfigAndQR(t *testing.T) {
 		t.Errorf("wrong disposition: %s", resp.Header.Get("Content-Disposition"))
 	}
 
+	// 测试传入自定义端口 ?port=8443
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/clients/windows-pc/config?port=8443", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bufConf := new(bytes.Buffer)
+	_, _ = bufConf.ReadFrom(resp.Body)
+	if !strings.Contains(bufConf.String(), ":8443") {
+		t.Errorf("expected :8443 in config, got %s", bufConf.String())
+	}
+
 	// 3. GET /api/clients/windows-pc/qr.png
 	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/clients/windows-pc/qr.png", nil)
 	req.AddCookie(cookie)

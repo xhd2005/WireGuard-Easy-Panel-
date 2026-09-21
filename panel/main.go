@@ -40,6 +40,7 @@ func main() {
 	flag.StringVar(&cfg.WGInterface, "iface", cfg.WGInterface, "WireGuard 网卡名")
 	flag.StringVar(&cfg.CredentialsPath, "creds", cfg.CredentialsPath, "管理员凭据存储文件路径")
 	flag.StringVar(&cfg.StatePath, "state", cfg.StatePath, "运行时状态存储文件路径")
+	flag.StringVar(&cfg.TrafficPath, "traffic", cfg.TrafficPath, "历史累计流量存储文件路径")
 	flag.StringVar(&cfg.BackupDir, "backup-dir", cfg.BackupDir, "配置文件修改前备份目录")
 	flag.Parse()
 
