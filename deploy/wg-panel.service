@@ -1,0 +1,18 @@
+[Unit]
+Description=WireGuard Web Management Panel
+After=network.target wg-quick@wg0.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wg-panel
+Restart=on-failure
+RestartSec=3
+User=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/etc/wireguard /var/lib/wg-panel /etc/wg-panel /var/backups/wg-panel
+
+[Install]
+WantedBy=multi-user.target
