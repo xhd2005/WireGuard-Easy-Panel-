@@ -6,9 +6,15 @@ panel/web/node_modules/
 panel/web/dist/
 panel/bin/
 
+# 客户端实际私钥配置（切勿提交）
+*.conf
+!fixtures/*.conf
+!fixtures/**/*.conf
+
 # 编辑器与系统噪声
 .DS_Store
 Thumbs.db
 *.swp
 .idea/
 .vscode/
+

@@ -28,9 +28,8 @@ echo "==> 编译静态二进制..."
 "$GO_BIN" build -v -ldflags="-s -w" -o "$REMOTE/wg-panel" .
 
 echo "==> 安装二进制到 /usr/local/bin/wg-panel..."
-sudo cp "$REMOTE/wg-panel" /usr/local/bin/wg-panel
-sudo chmod 755 /usr/local/bin/wg-panel
-sudo chown root:root /usr/local/bin/wg-panel
+sudo systemctl stop wg-panel.service 2>/dev/null || true
+sudo install -m 755 -o root -g root "$REMOTE/wg-panel" /usr/local/bin/wg-panel
 
 echo "==> 初始化受保护目录（0700 root:root）..."
 sudo mkdir -p /etc/wg-panel /var/lib/wg-panel /var/backups/wg-panel

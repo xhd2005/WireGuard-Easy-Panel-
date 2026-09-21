@@ -1,17 +1,26 @@
 package api
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
+	"github.com/xaxanb/wg/panel/internal/apply"
 	"github.com/xaxanb/wg/panel/internal/auth"
+	"github.com/xaxanb/wg/panel/internal/clientconf"
 	"github.com/xaxanb/wg/panel/internal/config"
+	"github.com/xaxanb/wg/panel/internal/keygen"
+	"github.com/xaxanb/wg/panel/internal/qr"
 	"github.com/xaxanb/wg/panel/internal/status"
 	"github.com/xaxanb/wg/panel/internal/wgconf"
 )
@@ -20,6 +29,8 @@ const (
 	HeaderCSRF = "X-Requested-With"
 	CSRFValue  = "wg-panel"
 )
+
+var reClientName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,15}$`)
 
 // SystemReader 抽象系统读操作，使单元测试与生产实现解耦。
 type SystemReader interface {
@@ -68,24 +79,29 @@ func (r *DefaultReader) DetectFirewallBackend() string {
 
 // Server 是面板的 HTTP API 服务。
 type Server struct {
-	cfg    *config.Config
-	auth   *auth.Manager
-	reader SystemReader
-	webFS  fs.FS
-	mux    *http.ServeMux
+	cfg     *config.Config
+	auth    *auth.Manager
+	reader  SystemReader
+	applier apply.Applier
+	webFS   fs.FS
+	mux     *http.ServeMux
 }
 
 // NewServer 构建并注册所有路由与中间件。
-func NewServer(cfg *config.Config, authMgr *auth.Manager, reader SystemReader, webFS fs.FS) *Server {
+func NewServer(cfg *config.Config, authMgr *auth.Manager, reader SystemReader, applier apply.Applier, webFS fs.FS) *Server {
 	if reader == nil {
 		reader = &DefaultReader{ConfPath: cfg.WGConfPath, Iface: cfg.WGInterface}
 	}
+	if applier == nil {
+		applier = apply.NewRealApplier(cfg.WGConfPath, cfg.WGInterface, cfg.BackupDir, filepath.Dir(cfg.StatePath))
+	}
 	s := &Server{
-		cfg:    cfg,
-		auth:   authMgr,
-		reader: reader,
-		webFS:  webFS,
-		mux:    http.NewServeMux(),
+		cfg:     cfg,
+		auth:    authMgr,
+		reader:  reader,
+		applier: applier,
+		webFS:   webFS,
+		mux:     http.NewServeMux(),
 	}
 	s.registerRoutes()
 	return s
@@ -102,19 +118,30 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/session", s.handleSession)
 	s.mux.HandleFunc("GET /api/version", s.handleVersion)
 
-	// 密码修改（受 session 保护，但允许处于 mustChangePassword 状态的用户访问）
+	// 密码修改
 	s.mux.HandleFunc("PUT /api/password", s.withAuth(s.handlePassword))
 
-	// 只读业务端点（要求已认证且不可处于 mustChangePassword 状态）
+	// 只读业务端点
 	s.mux.HandleFunc("GET /api/server", s.withAuth(s.handleServerInfo))
 	s.mux.HandleFunc("GET /api/clients", s.withAuth(s.handleClientsList))
 	s.mux.HandleFunc("GET /api/status", s.withAuth(s.handleStatus))
+	s.mux.HandleFunc("GET /api/redistribution", s.withAuth(s.handleRedistributionStatus))
+
+	// 阶段 4：写操作端点
+	s.mux.HandleFunc("POST /api/clients", s.withAuth(s.handleAddClient))
+	s.mux.HandleFunc("DELETE /api/clients/{name}", s.withAuth(s.handleDeleteClient))
+	s.mux.HandleFunc("POST /api/clients/{name}/rotate-key", s.withAuth(s.handleRotateKey))
+	s.mux.HandleFunc("GET /api/clients/{name}/config", s.withAuth(s.handleGetClientConfig))
+	s.mux.HandleFunc("GET /api/clients/{name}/qr.png", s.withAuth(s.handleGetClientQR))
+
+	// 阶段 5：变更与批量导出
+	s.mux.HandleFunc("PUT /api/server/endpoint", s.withAuth(s.handleUpdateEndpoint))
+	s.mux.HandleFunc("GET /api/clients/export.zip", s.withAuth(s.handleExportZip))
 
 	// 嵌入静态前端资源
 	if s.webFS != nil {
 		fileServer := http.FileServer(http.FS(s.webFS))
 		s.mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-			// 如果是 API 未匹配的路径，返回 404 JSON 而非 HTML
 			if strings.HasPrefix(r.URL.Path, "/api/") {
 				s.jsonError(w, http.StatusNotFound, "not_found", "API 端点不存在")
 				return
@@ -127,7 +154,6 @@ func (s *Server) registerRoutes() {
 // withAuth 校验登录 Session 及 CSRF 头，并在强制改密期间限制访问范围。
 func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// CSRF 保护：非 GET/HEAD/OPTIONS 必须带 X-Requested-With: wg-panel
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			hdr := r.Header.Get(HeaderCSRF)
 			if hdr != CSRFValue {
@@ -148,7 +174,6 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// 若用户处于强制改密状态，只允许访问改密与登出端点
 		if sess.MustChangePassword && r.URL.Path != "/api/password" && r.URL.Path != "/api/logout" && r.URL.Path != "/api/session" {
 			s.jsonError(w, http.StatusForbidden, "password_change_required", "首次登录必须修改初始密码")
 			return
@@ -158,10 +183,9 @@ func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// ----------------------------------------------------------- Handlers
+// ----------------------------------------------------------- Auth Handlers
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	// CSRF 检查
 	if r.Header.Get(HeaderCSRF) != CSRFValue {
 		s.jsonError(w, http.StatusForbidden, "csrf_rejected", "缺少合法的 X-Requested-With 头")
 		return
@@ -182,7 +206,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 写入 HttpOnly, SameSite=Strict Cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.DefaultSessionCookie,
 		Value:    token,
@@ -190,7 +213,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Expires:  sess.ExpiresAt,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		Secure:   !s.cfg.AllowInsecure, // 在允许非安全监听时允许明文，否则必须 Secure
+		Secure:   !s.cfg.AllowInsecure,
 	})
 
 	s.jsonResponse(w, http.StatusOK, map[string]any{
@@ -251,6 +274,8 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	s.jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+// ----------------------------------------------------------- Read-only Handlers
 
 func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
 	data, err := s.reader.ReadWGConf()
@@ -366,6 +391,516 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		"commit":    s.cfg.Commit,
 		"buildTime": s.cfg.BuildTime,
 	})
+}
+
+// ----------------------------------------------------------- Phase 4: Write Handlers
+
+func (s *Server) handleAddClient(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string   `json:"name"`
+		DNS  []string `json:"dns"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "bad_request", "请求格式错误")
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if !reClientName.MatchString(name) {
+		s.jsonError(w, http.StatusBadRequest, "invalid_name", "客户端名称必须为 1-15 位的字母、数字、下划线或短横线")
+		return
+	}
+
+	var generatedConf string
+	var allocatedV4 string
+
+	err := s.applier.WithLock(func() error {
+		data, err := s.reader.ReadWGConf()
+		if err != nil {
+			return fmt.Errorf("读取配置失败: %w", err)
+		}
+		srv, err := wgconf.Parse(data)
+		if err != nil {
+			return fmt.Errorf("配置无法解析: %w", err)
+		}
+		if srv.HasPeer(name) {
+			return errors.New("peer_exists")
+		}
+
+		octet, err := srv.AllocateOctet()
+		if err != nil {
+			return err
+		}
+
+		clientPriv, err := keygen.GeneratePrivateKey()
+		if err != nil {
+			return err
+		}
+		clientPub, err := keygen.PublicKey(clientPriv)
+		if err != nil {
+			return err
+		}
+		psk, err := keygen.GeneratePresharedKey()
+		if err != nil {
+			return err
+		}
+		srvPub, err := keygen.PublicKey(srv.PrivateKey)
+		if err != nil {
+			return err
+		}
+
+		v4 := fmt.Sprintf("10.7.0.%d/32", octet)
+		allocatedV4 = v4
+		allowedIPs := []string{v4}
+
+		// 如果服务端配置了 IPv6，客户端同样分配同末段的 IPv6 地址
+		clientV6 := ""
+		for _, addr := range srv.Address {
+			if strings.Contains(addr, ":") {
+				prefix := strings.TrimSuffix(strings.Split(addr, "/")[0], "1")
+				v6Sub := fmt.Sprintf("%s%d/128", prefix, octet)
+				allowedIPs = append(allowedIPs, v6Sub)
+				clientV6 = fmt.Sprintf("%s%d/64", prefix, octet)
+				break
+			}
+		}
+
+		if err := srv.AddPeer(name, clientPub, psk, allowedIPs, req.DNS); err != nil {
+			return err
+		}
+
+		endpointStr := fmt.Sprintf("%s:%d", srv.Endpoint, srv.ListenPort)
+		clientConfText := clientconf.Generate(clientconf.Params{
+			ClientName:       name,
+			ClientPrivateKey: clientPriv,
+			ClientIPv4:       fmt.Sprintf("10.7.0.%d/24", octet),
+			ClientIPv6:       clientV6,
+			DNS:              req.DNS,
+			ServerPublicKey:  srvPub,
+			PresharedKey:     psk,
+			ServerEndpoint:   endpointStr,
+			MTU:              srv.MTU,
+		})
+
+		if _, err := s.applier.Backup(); err != nil {
+			return err
+		}
+		if err := s.applier.WriteAtomic(srv.Marshal()); err != nil {
+			return err
+		}
+		if err := s.applier.SyncConf(); err != nil {
+			return err
+		}
+		if err := s.applier.SaveClientConf(name, clientConfText); err != nil {
+			return err
+		}
+
+		generatedConf = clientConfText
+		return nil
+	})
+
+	if err != nil {
+		if err.Error() == "peer_exists" {
+			s.jsonError(w, http.StatusConflict, "peer_exists", fmt.Sprintf("客户端 %s 已存在", name))
+			return
+		}
+		s.jsonError(w, http.StatusInternalServerError, "add_client_failed", err.Error())
+		return
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]any{
+		"name":   name,
+		"ipV4":   allocatedV4,
+		"config": generatedConf,
+	})
+}
+
+func (s *Server) handleDeleteClient(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		s.jsonError(w, http.StatusBadRequest, "bad_request", "缺少客户端名称")
+		return
+	}
+
+	var orphanNotice string
+	err := s.applier.WithLock(func() error {
+		data, err := s.reader.ReadWGConf()
+		if err != nil {
+			return err
+		}
+		srv, err := wgconf.Parse(data)
+		if err != nil {
+			return err
+		}
+		if !srv.HasPeer(name) {
+			return errors.New("not_found")
+		}
+
+		if err := srv.RemovePeer(name); err != nil {
+			return err
+		}
+
+		if _, err := s.applier.Backup(); err != nil {
+			return err
+		}
+		if err := s.applier.WriteAtomic(srv.Marshal()); err != nil {
+			return err
+		}
+		if err := s.applier.SyncConf(); err != nil {
+			return err
+		}
+		orphanNotice, _ = s.applier.DeleteClientConf(name)
+		return nil
+	})
+
+	if err != nil {
+		if err.Error() == "not_found" {
+			s.jsonError(w, http.StatusNotFound, "not_found", fmt.Sprintf("客户端 %s 不存在", name))
+			return
+		}
+		s.jsonError(w, http.StatusInternalServerError, "delete_failed", err.Error())
+		return
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]any{
+		"status":       "ok",
+		"orphanNotice": orphanNotice,
+	})
+}
+
+func (s *Server) handleRotateKey(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		s.jsonError(w, http.StatusBadRequest, "bad_request", "缺少客户端名称")
+		return
+	}
+
+	var newConfText string
+	err := s.applier.WithLock(func() error {
+		data, err := s.reader.ReadWGConf()
+		if err != nil {
+			return err
+		}
+		srv, err := wgconf.Parse(data)
+		if err != nil {
+			return err
+		}
+		if !srv.HasPeer(name) {
+			return errors.New("not_found")
+		}
+
+		newClientPriv, err := keygen.GeneratePrivateKey()
+		if err != nil {
+			return err
+		}
+		newClientPub, err := keygen.PublicKey(newClientPriv)
+		if err != nil {
+			return err
+		}
+		newPsk, err := keygen.GeneratePresharedKey()
+		if err != nil {
+			return err
+		}
+		srvPub, err := keygen.PublicKey(srv.PrivateKey)
+		if err != nil {
+			return err
+		}
+
+		if err := srv.ReplacePeerKey(name, newClientPub, newPsk); err != nil {
+			return err
+		}
+
+		var p wgconf.Peer
+		for _, peer := range srv.Peers {
+			if peer.Name == name {
+				p = peer
+				break
+			}
+		}
+
+		v4, v6 := "", ""
+		for _, ip := range p.AllowedIPs {
+			if strings.Contains(ip, ".") && v4 == "" {
+				v4 = fmt.Sprintf("10.7.0.%d/24", p.IPv4Octet())
+			} else if strings.Contains(ip, ":") && v6 == "" {
+				v6 = fmt.Sprintf("fddd:2c4:2c4:2c4::%d/64", p.IPv4Octet())
+			}
+		}
+
+		newConfText = clientconf.Generate(clientconf.Params{
+			ClientName:       name,
+			ClientPrivateKey: newClientPriv,
+			ClientIPv4:       v4,
+			ClientIPv6:       v6,
+			DNS:              p.DNS,
+			ServerPublicKey:  srvPub,
+			PresharedKey:     newPsk,
+			ServerEndpoint:   fmt.Sprintf("%s:%d", srv.Endpoint, srv.ListenPort),
+			MTU:              srv.MTU,
+		})
+
+		if _, err := s.applier.Backup(); err != nil {
+			return err
+		}
+		if err := s.applier.WriteAtomic(srv.Marshal()); err != nil {
+			return err
+		}
+		if err := s.applier.SyncConf(); err != nil {
+			return err
+		}
+		return s.applier.SaveClientConf(name, newConfText)
+	})
+
+	if err != nil {
+		if err.Error() == "not_found" {
+			s.jsonError(w, http.StatusNotFound, "not_found", fmt.Sprintf("客户端 %s 不存在", name))
+			return
+		}
+		s.jsonError(w, http.StatusInternalServerError, "rotate_key_failed", err.Error())
+		return
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]any{
+		"name":   name,
+		"config": newConfText,
+	})
+}
+
+func (s *Server) handleGetClientConfig(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	conf, err := s.applier.ReadClientConf(name)
+	if err != nil {
+		s.jsonError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".conf"))
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(conf))
+}
+
+func (s *Server) handleGetClientQR(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	conf, err := s.applier.ReadClientConf(name)
+	if err != nil {
+		s.jsonError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+
+	png, err := qr.GeneratePNG(conf, 320)
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "qr_failed", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(png)
+}
+
+// ----------------------------------------------------------- Phase 5: Mutation & Batch Handlers
+
+func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ListenPort int    `json:"listenPort"`
+		Endpoint   string `json:"endpoint"`
+		MTU        int    `json:"mtu"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.jsonError(w, http.StatusBadRequest, "bad_request", "请求体格式错误")
+		return
+	}
+
+	err := s.applier.WithLock(func() error {
+		data, err := s.reader.ReadWGConf()
+		if err != nil {
+			return err
+		}
+		srv, err := wgconf.Parse(data)
+		if err != nil {
+			return err
+		}
+
+		portChanged := req.ListenPort > 0 && req.ListenPort != srv.ListenPort
+		endpointChanged := req.Endpoint != "" && req.Endpoint != srv.Endpoint
+		mtuChanged := req.MTU > 0 && req.MTU != srv.MTU
+
+		if !portChanged && !endpointChanged && !mtuChanged {
+			return nil
+		}
+
+		if portChanged {
+			if ln, err := net.Listen("udp", fmt.Sprintf(":%d", req.ListenPort)); err != nil {
+				return fmt.Errorf("目标端口 %d 已被占用: %w", req.ListenPort, err)
+			} else {
+				_ = ln.Close()
+			}
+			if err := srv.SetListenPort(req.ListenPort); err != nil {
+				return err
+			}
+		}
+
+		if endpointChanged {
+			if err := srv.SetEndpoint(req.Endpoint); err != nil {
+				return err
+			}
+		}
+
+		if mtuChanged {
+			if err := srv.SetMTU(req.MTU); err != nil {
+				return err
+			}
+		}
+
+		if _, err := s.applier.Backup(); err != nil {
+			return err
+		}
+		if err := s.applier.WriteAtomic(srv.Marshal()); err != nil {
+			return err
+		}
+
+		if portChanged {
+			if strings.Contains(s.reader.DetectFirewallBackend(), "firewalld") {
+				_ = exec.Command("firewall-cmd", "-q", fmt.Sprintf("--remove-port=%d/udp", srv.ListenPort)).Run()
+				_ = exec.Command("firewall-cmd", "-q", "--permanent", fmt.Sprintf("--remove-port=%d/udp", srv.ListenPort)).Run()
+				_ = exec.Command("firewall-cmd", "-q", fmt.Sprintf("--add-port=%d/udp", req.ListenPort)).Run()
+				_ = exec.Command("firewall-cmd", "-q", "--permanent", fmt.Sprintf("--add-port=%d/udp", req.ListenPort)).Run()
+			} else {
+				_ = s.applier.RestartService("wg-iptables.service")
+			}
+		}
+
+		if err := s.applier.RestartService(fmt.Sprintf("wg-quick@%s.service", s.cfg.WGInterface)); err != nil {
+			return err
+		}
+
+		srvPub, _ := keygen.PublicKey(srv.PrivateKey)
+		endpointStr := fmt.Sprintf("%s:%d", srv.Endpoint, srv.ListenPort)
+		oldConfs, _ := s.applier.ListClientConfs()
+
+		for _, p := range srv.Peers {
+			oldText := oldConfs[p.Name]
+			clientPriv := extractClientPrivateKey(oldText)
+			if clientPriv == "" {
+				continue
+			}
+
+			v4, v6 := "", ""
+			for _, ip := range p.AllowedIPs {
+				if strings.Contains(ip, ".") && v4 == "" {
+					v4 = fmt.Sprintf("10.7.0.%d/24", p.IPv4Octet())
+				} else if strings.Contains(ip, ":") && v6 == "" {
+					v6 = fmt.Sprintf("fddd:2c4:2c4:2c4::%d/64", p.IPv4Octet())
+				}
+			}
+
+			updatedConf := clientconf.Generate(clientconf.Params{
+				ClientName:       p.Name,
+				ClientPrivateKey: clientPriv,
+				ClientIPv4:       v4,
+				ClientIPv6:       v6,
+				DNS:              p.DNS,
+				ServerPublicKey:  srvPub,
+				PresharedKey:     p.PresharedKey,
+				ServerEndpoint:   endpointStr,
+				MTU:              srv.MTU,
+			})
+			_ = s.applier.SaveClientConf(p.Name, updatedConf)
+		}
+
+		s.saveRedistributionState(time.Now().Unix(), len(srv.Peers))
+		return nil
+	})
+
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "update_endpoint_failed", err.Error())
+		return
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleExportZip(w http.ResponseWriter, r *http.Request) {
+	confs, err := s.applier.ListClientConfs()
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "list_confs_failed", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"wireguard-clients.zip\"")
+	w.Header().Set("Cache-Control", "no-store")
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	for name, content := range confs {
+		fw, err := zw.Create(name + ".conf")
+		if err != nil {
+			continue
+		}
+		_, _ = fw.Write([]byte(content))
+	}
+}
+
+func (s *Server) handleRedistributionStatus(w http.ResponseWriter, r *http.Request) {
+	type State struct {
+		Needed    bool  `json:"needed"`
+		ChangedAt int64 `json:"changedAt"`
+	}
+	var state State
+	b, err := os.ReadFile(s.cfg.StatePath)
+	if err == nil {
+		_ = json.Unmarshal(b, &state)
+	}
+
+	pending := []string{}
+	if state.Needed {
+		if raw, err := s.reader.ReadWGShow(); err == nil {
+			if st, err := status.ParseShow(raw); err == nil {
+				for _, p := range st.Peers {
+					if p.HandshakeTime < state.ChangedAt {
+						pending = append(pending, p.PublicKey)
+					}
+				}
+				if len(pending) == 0 && len(st.Peers) > 0 {
+					state.Needed = false
+					s.saveRedistributionState(0, 0)
+				}
+			}
+		}
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]any{
+		"needed":       state.Needed,
+		"changedAt":    state.ChangedAt,
+		"pendingPeers": pending,
+	})
+}
+
+func (s *Server) saveRedistributionState(changedAt int64, peerCount int) {
+	_ = os.MkdirAll(filepath.Dir(s.cfg.StatePath), 0700)
+	state := map[string]any{
+		"needed":    changedAt > 0,
+		"changedAt": changedAt,
+		"peerCount": peerCount,
+	}
+	b, _ := json.Marshal(state)
+	_ = os.WriteFile(s.cfg.StatePath, b, 0600)
+}
+
+func extractClientPrivateKey(conf string) string {
+	for _, line := range strings.Split(conf, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(trimmed), "privatekey") {
+			parts := strings.SplitN(trimmed, "=", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	return ""
 }
 
 // ----------------------------------------------------------- Helpers

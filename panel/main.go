@@ -85,7 +85,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := api.NewServer(cfg, authMgr, nil, WebAssets())
+	srv := api.NewServer(cfg, authMgr, nil, nil, WebAssets())
 	httpSrv := &http.Server{
 		Handler:      srv.Handler(),
 		ReadTimeout:  15 * time.Second,

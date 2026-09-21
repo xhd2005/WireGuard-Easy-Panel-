@@ -14,6 +14,7 @@
       --primary: #3b82f6;
       --primary-hover: #2563eb;
       --danger: #ef4444;
+      --danger-hover: #dc2626;
       --warning: #f59e0b;
       --success: #10b981;
       --radius: 8px;
@@ -27,7 +28,7 @@
       padding: 1rem;
       min-height: 100vh;
     }
-    .container { max-width: 1000px; margin: 0 auto; }
+    .container { max-width: 1060px; margin: 0 auto; }
     header {
       display: flex;
       justify-content: space-between;
@@ -54,11 +55,20 @@
       font-weight: 500;
       font-size: 0.875rem;
       transition: background 0.15s ease;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.25rem;
     }
     .btn:hover { background: var(--primary-hover); }
+    .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
     .btn-secondary { background: #475569; }
     .btn-secondary:hover { background: #334155; }
     .btn-danger { background: var(--danger); }
+    .btn-danger:hover { background: var(--danger-hover); }
+    .btn-success { background: #059669; }
+    .btn-success:hover { background: #047857; }
     .card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
@@ -73,10 +83,12 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
     }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
     .info-item label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem; }
-    .info-item span { font-weight: 600; font-size: 1rem; }
+    .info-item span { font-weight: 600; font-size: 1rem; word-break: break-all; }
     .banner {
       background: rgba(245, 158, 11, 0.15);
       border: 1px solid var(--warning);
@@ -103,7 +115,7 @@
     .status-online { background: var(--success); }
     .status-offline { background: #64748b; }
     .login-box {
-      max-width: 400px;
+      max-width: 420px;
       margin: 10vh auto;
       background: var(--card-bg);
       border: 1px solid var(--card-border);
@@ -134,13 +146,29 @@
     .hidden { display: none !important; }
     .modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.7);
+      background: rgba(0,0,0,0.75);
       display: flex; align-items: center; justify-content: center;
       z-index: 99;
+      padding: 1rem;
+    }
+    .actions-cell { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    pre.code-box {
+      background: #090d16;
+      border: 1px solid #1e293b;
+      padding: 0.75rem;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 0.8rem;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #38bdf8;
     }
   </style>
 </head>
 <body>
+  <!-- 登录视图 -->
   <div id="login-view" class="login-box hidden">
     <h2 style="margin-bottom: 1.5rem; text-align: center;">WireGuard 登录</h2>
     <div id="login-error" class="error-msg hidden"></div>
@@ -157,6 +185,7 @@
     </form>
   </div>
 
+  <!-- 改密弹窗 -->
   <div id="pwd-modal" class="modal hidden">
     <div class="login-box" style="margin: 0; width: 100%;">
       <h3 style="margin-bottom: 1rem;">修改密码</h3>
@@ -181,40 +210,137 @@
     </div>
   </div>
 
+  <!-- 添加客户端弹窗 -->
+  <div id="add-client-modal" class="modal hidden">
+    <div class="login-box" style="margin: 0; width: 100%; max-width: 480px;">
+      <h3 style="margin-bottom: 1rem;">添加客户端</h3>
+      <div id="add-client-error" class="error-msg hidden"></div>
+      <form id="add-client-form">
+        <div class="form-group">
+          <label for="client-name">客户端名称（如 windows-pc, phone）</label>
+          <input type="text" id="client-name" class="form-control" placeholder="1-15位字母/数字/下划线/短横线" pattern="^[A-Za-z0-9_-]{1,15}$" required>
+        </div>
+        <div class="form-group">
+          <label for="client-dns">DNS 服务器（多个用逗号隔开，留空使用腾讯云内网DNS）</label>
+          <input type="text" id="client-dns" class="form-control" placeholder="例如: 183.60.83.19, 183.60.82.98">
+        </div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
+          <button type="button" id="add-client-cancel-btn" class="btn btn-secondary">取消</button>
+          <button type="submit" class="btn btn-success" id="add-client-submit-btn">立即创建</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 查看/导出客户端配置与二维码弹窗 -->
+  <div id="client-qr-modal" class="modal hidden">
+    <div class="login-box" style="margin: 0; width: 100%; max-width: 520px; text-align: center;">
+      <h3 id="qr-modal-title" style="margin-bottom: 1rem;">客户端配置与二维码</h3>
+      <div style="margin-bottom: 1rem;">
+        <img id="qr-image" src="" alt="WireGuard QR Code" style="background:#fff; padding:10px; border-radius:8px; max-width: 260px; height: auto;">
+      </div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">手机 WireGuard App 直接扫描上方二维码即可导入连接</p>
+      
+      <div style="text-align: left; margin-bottom: 1rem;">
+        <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem; display:block;">配置文件内容（.conf）：</label>
+        <pre id="conf-preview" class="code-box"></pre>
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+        <button id="copy-conf-btn" class="btn btn-secondary">复制配置文本</button>
+        <a id="download-conf-btn" href="#" download="" class="btn">下载 .conf 文件</a>
+        <button type="button" id="qr-modal-close-btn" class="btn btn-secondary">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 编辑服务端端点/端口弹窗 -->
+  <div id="edit-server-modal" class="modal hidden">
+    <div class="login-box" style="margin: 0; width: 100%; max-width: 480px;">
+      <h3 style="margin-bottom: 1rem;">修改服务器端点与端口</h3>
+      <p style="font-size: 0.8rem; color: var(--warning); margin-bottom: 1rem;">
+        ⚠️ 修改监听端口或公网端点后，所有存量客户端必须重新导入最新配置才能恢复连接！
+      </p>
+      <div id="edit-server-error" class="error-msg hidden"></div>
+      <form id="edit-server-form">
+        <div class="form-group">
+          <label for="srv-endpoint-input">公网端点 (Endpoint / 域名或IP)</label>
+          <input type="text" id="srv-endpoint-input" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label for="srv-port-input">监听端口 (UDP，1-65535)</label>
+          <input type="number" id="srv-port-input" class="form-control" min="1" max="65535" required>
+        </div>
+        <div class="form-group">
+          <label for="srv-mtu-input">MTU（默认 1420，网络较差/跨洋丢包严重可尝试 1280）</label>
+          <select id="srv-mtu-input" class="form-control">
+            <option value="1420">1420 (标准推荐)</option>
+            <option value="1360">1360 (抗中度分片)</option>
+            <option value="1280">1280 (IPv6 最小标准 / 严苛网络)</option>
+          </select>
+        </div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
+          <button type="button" id="edit-server-cancel-btn" class="btn btn-secondary">取消</button>
+          <button type="submit" class="btn">保存并生效</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 主控制台仪表盘 -->
   <div id="dashboard-view" class="container hidden">
     <header>
-      <h1>WireGuard 面板 <span class="badge" id="version-badge">v0.1.0</span></h1>
+      <h1>WireGuard 控制面板 <span class="badge" id="version-badge">v0.1.0</span></h1>
       <div style="display: flex; gap: 0.5rem; align-items: center;">
         <button id="change-pwd-btn" class="btn btn-secondary" style="font-size: 0.8rem;">修改密码</button>
         <button id="logout-btn" class="btn btn-danger" style="font-size: 0.8rem;">登出</button>
       </div>
     </header>
 
+    <!-- 重分发提示横幅 (Spec Section 8) -->
+    <div id="redistribute-warning" class="banner hidden">
+      <div>⚠️</div>
+      <div style="flex: 1;">
+        <strong>配置待重分发提醒：</strong>服务器对外端点、端口或 MTU 曾发生过变更。请下载最新配置或扫描最新二维码为客户端更新配置，客户端一旦握手成功本提示将自动解除。
+      </div>
+      <a href="/api/clients/export.zip" class="btn btn-sm" style="background:var(--warning); color:#000; font-weight:600;">打包下载全部配置 (.zip)</a>
+    </div>
+
+    <!-- 防火墙提示横幅 (Spec Section 4.2) -->
     <div id="firewall-warning" class="banner hidden">
       <div>⚠️</div>
       <div>
-        <strong>防火墙可能未放行：</strong>检测到当前所有客户端均未发生握手（从未连接）。
-        若您部署在腾讯云等云服务器上，请务必检查云控制台的<strong>安全组 / 防火墙规则</strong>是否已放行此服务器的 WireGuard UDP 端口！
+        <strong>云控制台防火墙未放行提醒：</strong>检测到当前全部客户端从未握手连接。
+        若您部署在腾讯云等云服务器上，请务必检查云控制台的<strong>安全组 / 防火墙规则</strong>是否已放行本服务器当前的 WireGuard UDP 端口！
       </div>
     </div>
 
+    <!-- 服务器状态卡片 -->
     <div class="card">
       <div class="card-title">
-        <span>服务器状态</span>
-        <button id="refresh-btn" class="btn btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.8rem;">刷新</button>
+        <span>服务器运行状态</span>
+        <div style="display:flex; gap:0.5rem;">
+          <button id="edit-srv-btn" class="btn btn-secondary btn-sm">修改端点/端口</button>
+          <a href="/api/clients/export.zip" class="btn btn-secondary btn-sm">导出全部 (.zip)</a>
+          <button id="refresh-btn" class="btn btn-secondary btn-sm">刷新</button>
+        </div>
       </div>
       <div class="grid">
         <div class="info-item"><label>公网端点 (Endpoint)</label><span id="srv-endpoint">-</span></div>
         <div class="info-item"><label>监听端口 (UDP)</label><span id="srv-port">-</span></div>
-        <div class="info-item"><label>IPv4 虚拟子网</label><span id="srv-subnet4">-</span></div>
-        <div class="info-item"><label>IPv6 虚拟子网</label><span id="srv-subnet6">-</span></div>
-        <div class="info-item"><label>MTU</label><span id="srv-mtu">-</span></div>
-        <div class="info-item"><label>宿主防火墙识别</label><span id="srv-firewall">-</span></div>
+        <div class="info-item"><label>IPv4 虚拟网段</label><span id="srv-subnet4">-</span></div>
+        <div class="info-item"><label>IPv6 虚拟网段</label><span id="srv-subnet6">-</span></div>
+        <div class="info-item"><label>MTU 设定</label><span id="srv-mtu">-</span></div>
+        <div class="info-item"><label>宿主防火墙</label><span id="srv-firewall">-</span></div>
       </div>
     </div>
 
+    <!-- 客户端列表卡片 -->
     <div class="card">
-      <div class="card-title">客户端列表 (<span id="clients-count">0</span>)</div>
+      <div class="card-title">
+        <span>客户端连接管理 (<span id="clients-count">0</span>)</span>
+        <button id="add-client-btn" class="btn btn-success btn-sm">+ 添加客户端</button>
+      </div>
       <div style="overflow-x: auto;">
         <table>
           <thead>
@@ -224,12 +350,13 @@
               <th>在线状态</th>
               <th>最近握手</th>
               <th>传输流量 (下行 / 上行)</th>
-              <th>端点 (Endpoint)</th>
+              <th>端点</th>
               <th>公钥</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody id="clients-table-body">
-            <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
+            <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
           </tbody>
         </table>
       </div>
@@ -282,14 +409,19 @@
       }
     }
 
+    let currentServerInfo = {};
+
     async function loadDashboard() {
       try {
-        const [server, clients, liveStatus, version] = await Promise.all([
+        const [server, clients, liveStatus, version, redist] = await Promise.all([
           api('/api/server'),
           api('/api/clients'),
           api('/api/status').catch(() => null),
-          api('/api/version').catch(() => null)
+          api('/api/version').catch(() => null),
+          api('/api/redistribution').catch(() => null)
         ]);
+
+        currentServerInfo = server;
 
         if (version && version.version) {
           document.getElementById('version-badge').textContent = 'v' + version.version;
@@ -299,13 +431,21 @@
         document.getElementById('srv-port').textContent = server.listenPort || '-';
         document.getElementById('srv-subnet4').textContent = server.subnetV4 || '-';
         document.getElementById('srv-subnet6').textContent = server.subnetV6 || '(未启用)';
-        document.getElementById('srv-mtu').textContent = server.mtu ? server.mtu : '1420 (默认)';
+        document.getElementById('srv-mtu').textContent = server.mtu > 0 ? server.mtu : '1420 (默认)';
         document.getElementById('srv-firewall').textContent = server.firewallBackend || 'iptables';
 
+        // 防火墙未放行提醒
         if (liveStatus && liveStatus.allNeverHandshake && clients.length > 0) {
           document.getElementById('firewall-warning').classList.remove('hidden');
         } else {
           document.getElementById('firewall-warning').classList.add('hidden');
+        }
+
+        // 端点重分发提醒
+        if (redist && redist.needed) {
+          document.getElementById('redistribute-warning').classList.remove('hidden');
+        } else {
+          document.getElementById('redistribute-warning').classList.add('hidden');
         }
 
         renderClients(clients, liveStatus);
@@ -318,7 +458,7 @@
       document.getElementById('clients-count').textContent = clients.length;
       const tbody = document.getElementById('clients-table-body');
       if (clients.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">暂无客户端</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无客户端，点击上方按钮添加</td></tr>';
         return;
       }
 
@@ -343,10 +483,16 @@
           <td><strong>${escapeHtml(c.name)}</strong></td>
           <td>${escapeHtml(c.ipV4)}${c.ipV6 ? '<br><small style="color:var(--text-muted);">' + escapeHtml(c.ipV6) + '</small>' : ''}</td>
           <td>${statusHtml}</td>
-          <td>${escapeHtml(handshake)}</td>
-          <td>${escapeHtml(traffic)}</td>
+          <td><small>${escapeHtml(handshake)}</small></td>
+          <td><small>${escapeHtml(traffic)}</small></td>
           <td><small>${escapeHtml(ep)}</small></td>
-          <td><span class="peer-key" title="${escapeHtml(c.publicKey)}">${escapeHtml(c.publicKey.slice(0, 10))}...</span></td>
+          <td><span class="peer-key" title="${escapeHtml(c.publicKey)}">${escapeHtml(c.publicKey.slice(0, 8))}...</span></td>
+          <td class="actions-cell">
+            <button onclick="viewClientQR('${escapeHtml(c.name)}')" class="btn btn-sm">配置/二维码</button>
+            <a href="/api/clients/${encodeURIComponent(c.name)}/config" download="${escapeHtml(c.name)}.conf" class="btn btn-secondary btn-sm">下载</a>
+            <button onclick="rotateClientKey('${escapeHtml(c.name)}')" class="btn btn-secondary btn-sm" title="更换新密钥（旧设备断开）">重置</button>
+            <button onclick="deleteClient('${escapeHtml(c.name)}')" class="btn btn-danger btn-sm">删除</button>
+          </td>
         </tr>`;
       }).join('');
     }
@@ -370,6 +516,68 @@
       }
     }
 
+    async function viewClientQR(name) {
+      try {
+        const res = await fetch(`/api/clients/${encodeURIComponent(name)}/config`, { headers: API_HEADER });
+        if (!res.ok) throw new Error('读取配置失败');
+        const confText = await res.text();
+        showQRModal(name, `/api/clients/${encodeURIComponent(name)}/qr.png?t=${Date.now()}`, confText);
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    function showQRModal(name, qrUrl, confText) {
+      document.getElementById('qr-modal-title').textContent = `客户端: ${name}`;
+      document.getElementById('qr-image').src = qrUrl;
+      document.getElementById('conf-preview').textContent = confText;
+
+      const dlBtn = document.getElementById('download-conf-btn');
+      dlBtn.href = `data:text/plain;charset=utf-8,${encodeURIComponent(confText)}`;
+      dlBtn.download = `${name}.conf`;
+
+      document.getElementById('copy-conf-btn').onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(confText);
+          alert('配置文本已复制到剪贴板！');
+        } catch {
+          alert('请手动选择下方文本框进行复制');
+        }
+      };
+
+      document.getElementById('client-qr-modal').classList.remove('hidden');
+    }
+
+    async function rotateClientKey(name) {
+      if (!confirm(`确定要重置客户端 ${name} 的密钥吗？\n重置后旧设备将立即掉线，需要使用新生成的配置或扫码重新连接！`)) {
+        return;
+      }
+      try {
+        const res = await api(`/api/clients/${encodeURIComponent(name)}/rotate-key`, { method: 'POST' });
+        alert(`客户端 ${name} 密钥已重置成功！`);
+        showQRModal(name, `/api/clients/${encodeURIComponent(name)}/qr.png?t=${Date.now()}`, res.config);
+        loadDashboard();
+      } catch (err) {
+        alert('重置密钥失败: ' + err.message);
+      }
+    }
+
+    async function deleteClient(name) {
+      if (!confirm(`确定要删除客户端 ${name} 吗？\n删除后该客户端将无法连接。`)) {
+        return;
+      }
+      try {
+        const res = await api(`/api/clients/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        if (res.orphanNotice) {
+          alert(res.orphanNotice);
+        }
+        loadDashboard();
+      } catch (err) {
+        alert('删除失败: ' + err.message);
+      }
+    }
+
+    // 事件绑定
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const errBox = document.getElementById('login-error');
@@ -413,6 +621,86 @@
         errBox.textContent = err.message;
         errBox.classList.remove('hidden');
       }
+    });
+
+    // 添加客户端
+    document.getElementById('add-client-btn').addEventListener('click', () => {
+      document.getElementById('add-client-form').reset();
+      document.getElementById('add-client-error').classList.add('hidden');
+      document.getElementById('add-client-modal').classList.remove('hidden');
+    });
+
+    document.getElementById('add-client-cancel-btn').addEventListener('click', () => {
+      document.getElementById('add-client-modal').classList.add('hidden');
+    });
+
+    document.getElementById('add-client-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errBox = document.getElementById('add-client-error');
+      errBox.classList.add('hidden');
+      const submitBtn = document.getElementById('add-client-submit-btn');
+      submitBtn.disabled = true;
+      submitBtn.textContent = '创建中...';
+
+      const name = document.getElementById('client-name').value.trim();
+      const dnsRaw = document.getElementById('client-dns').value.trim();
+      const dns = dnsRaw ? dnsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+      try {
+        const res = await api('/api/clients', {
+          method: 'POST',
+          body: JSON.stringify({ name, dns })
+        });
+        document.getElementById('add-client-modal').classList.add('hidden');
+        showQRModal(name, `/api/clients/${encodeURIComponent(name)}/qr.png?t=${Date.now()}`, res.config);
+        loadDashboard();
+      } catch (err) {
+        errBox.textContent = err.message;
+        errBox.classList.remove('hidden');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '立即创建';
+      }
+    });
+
+    // 修改服务器端点与端口
+    document.getElementById('edit-srv-btn').addEventListener('click', () => {
+      document.getElementById('edit-server-error').classList.add('hidden');
+      document.getElementById('srv-endpoint-input').value = currentServerInfo.endpoint || '';
+      document.getElementById('srv-port-input').value = currentServerInfo.listenPort || 53;
+      document.getElementById('srv-mtu-input').value = currentServerInfo.mtu > 0 ? currentServerInfo.mtu : '1420';
+      document.getElementById('edit-server-modal').classList.remove('hidden');
+    });
+
+    document.getElementById('edit-server-cancel-btn').addEventListener('click', () => {
+      document.getElementById('edit-server-modal').classList.add('hidden');
+    });
+
+    document.getElementById('edit-server-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errBox = document.getElementById('edit-server-error');
+      errBox.classList.add('hidden');
+
+      const endpoint = document.getElementById('srv-endpoint-input').value.trim();
+      const listenPort = parseInt(document.getElementById('srv-port-input').value, 10);
+      const mtu = parseInt(document.getElementById('srv-mtu-input').value, 10);
+
+      try {
+        await api('/api/server/endpoint', {
+          method: 'PUT',
+          body: JSON.stringify({ endpoint, listenPort, mtu })
+        });
+        document.getElementById('edit-server-modal').classList.add('hidden');
+        alert('服务器端点与参数修改成功！\n请注意下载最新配置文件或为存量客户端重新导入配置。');
+        loadDashboard();
+      } catch (err) {
+        errBox.textContent = err.message;
+        errBox.classList.remove('hidden');
+      }
+    });
+
+    document.getElementById('qr-modal-close-btn').addEventListener('click', () => {
+      document.getElementById('client-qr-modal').classList.add('hidden');
     });
 
     document.getElementById('pwd-cancel-btn').addEventListener('click', () => {

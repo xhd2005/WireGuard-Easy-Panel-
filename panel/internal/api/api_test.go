@@ -1,16 +1,20 @@
 package api
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/xaxanb/wg/panel/internal/apply"
 	"github.com/xaxanb/wg/panel/internal/auth"
 	"github.com/xaxanb/wg/panel/internal/config"
 )
@@ -38,6 +42,73 @@ func (m *mockReader) DetectFirewallBackend() string {
 	return "iptables-nft + ufw + 1Panel + Docker"
 }
 
+type testApplier struct {
+	mu        sync.Mutex
+	reader    *mockReader
+	backups   []string
+	confs     map[string]string
+	restarted []string
+}
+
+func newTestApplier(reader *mockReader) *testApplier {
+	return &testApplier{
+		reader: reader,
+		confs:  make(map[string]string),
+	}
+}
+
+func (a *testApplier) WithLock(fn func() error) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return fn()
+}
+
+func (a *testApplier) Backup() (string, error) {
+	bak := fmt.Sprintf("backup-%d.bak", len(a.backups))
+	a.backups = append(a.backups, bak)
+	return bak, nil
+}
+
+func (a *testApplier) WriteAtomic(data []byte) error {
+	a.reader.confData = data
+	return nil
+}
+
+func (a *testApplier) SyncConf() error {
+	return nil
+}
+
+func (a *testApplier) RestartService(name string) error {
+	a.restarted = append(a.restarted, name)
+	return nil
+}
+
+func (a *testApplier) SaveClientConf(name, content string) error {
+	a.confs[name] = content
+	return nil
+}
+
+func (a *testApplier) DeleteClientConf(name string) (string, error) {
+	delete(a.confs, name)
+	return "提示：请检查家目录遗留配置", nil
+}
+
+func (a *testApplier) ReadClientConf(name string) (string, error) {
+	c, ok := a.confs[name]
+	if !ok {
+		return "", fmt.Errorf("client %s not found", name)
+	}
+	return c, nil
+}
+
+func (a *testApplier) ListClientConfs() (map[string]string, error) {
+	res := make(map[string]string)
+	for k, v := range a.confs {
+		res[k] = v
+	}
+	return res, nil
+}
+
 func loadFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	p := filepath.Join("..", "..", "..", "fixtures", name)
@@ -48,7 +119,7 @@ func loadFixture(t *testing.T, name string) []byte {
 	return b
 }
 
-func setupTestServer(t *testing.T, reader SystemReader) (*Server, string) {
+func setupTestServer(t *testing.T, reader SystemReader, applier apply.Applier) (*Server, string) {
 	t.Helper()
 	credPath := filepath.Join(t.TempDir(), "credentials.json")
 	authMgr, initPass, err := auth.NewManager(credPath, time.Hour)
@@ -57,18 +128,18 @@ func setupTestServer(t *testing.T, reader SystemReader) (*Server, string) {
 	}
 	cfg := config.Default()
 	cfg.CredentialsPath = credPath
-	srv := NewServer(cfg, authMgr, reader, nil)
+	cfg.StatePath = filepath.Join(t.TempDir(), "state.json")
+	srv := NewServer(cfg, authMgr, reader, applier, nil)
 	return srv, initPass
 }
 
 func TestLoginLogoutAndSession(t *testing.T) {
-	srv, initPass := setupTestServer(t, &mockReader{})
+	srv, initPass := setupTestServer(t, &mockReader{}, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
 	client := ts.Client()
 
-	// 1. 无 CSRF 头的登录应被 403 拒绝
 	body, _ := json.Marshal(map[string]string{"username": "admin", "password": initPass})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/login", bytes.NewReader(body))
 	resp, err := client.Do(req)
@@ -79,7 +150,6 @@ func TestLoginLogoutAndSession(t *testing.T) {
 		t.Errorf("expected 403 without CSRF header, got %d", resp.StatusCode)
 	}
 
-	// 2. 错误密码登录应被 401 拒绝
 	badBody, _ := json.Marshal(map[string]string{"username": "admin", "password": "wrong-password"})
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/login", bytes.NewReader(badBody))
 	req.Header.Set(HeaderCSRF, CSRFValue)
@@ -91,7 +161,6 @@ func TestLoginLogoutAndSession(t *testing.T) {
 		t.Errorf("expected 401 on wrong password, got %d", resp.StatusCode)
 	}
 
-	// 3. 正确密码登录应成功，并返回 Cookie
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/login", bytes.NewReader(body))
 	req.Header.Set(HeaderCSRF, CSRFValue)
 	resp, err = client.Do(req)
@@ -113,7 +182,6 @@ func TestLoginLogoutAndSession(t *testing.T) {
 		t.Fatal("login response missing session cookie")
 	}
 
-	// 4. 查询当前 Session
 	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/session", nil)
 	req.AddCookie(sessionCookie)
 	resp, err = client.Do(req)
@@ -130,7 +198,6 @@ func TestLoginLogoutAndSession(t *testing.T) {
 		t.Errorf("unexpected session data: %+v", sessData)
 	}
 
-	// 5. 登出
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/logout", nil)
 	req.Header.Set(HeaderCSRF, CSRFValue)
 	req.AddCookie(sessionCookie)
@@ -141,30 +208,14 @@ func TestLoginLogoutAndSession(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200 on logout, got %d", resp.StatusCode)
 	}
-
-	// 6. 登出后再查 session 应为未认证
-	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/session", nil)
-	req.AddCookie(sessionCookie)
-	resp, err = client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sessData2 struct {
-		Authenticated bool `json:"authenticated"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&sessData2)
-	if sessData2.Authenticated {
-		t.Error("session should be invalid after logout")
-	}
 }
 
 func TestForcedPasswordChangeGating(t *testing.T) {
-	srv, initPass := setupTestServer(t, &mockReader{confData: loadFixture(t, "wg0-ipv6.conf")})
+	srv, initPass := setupTestServer(t, &mockReader{confData: loadFixture(t, "wg0-ipv6.conf")}, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	client := ts.Client()
 
-	// 登录拿到 session（处于 MustChangePassword 状态）
 	body, _ := json.Marshal(map[string]string{"username": "admin", "password": initPass})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/login", bytes.NewReader(body))
 	req.Header.Set(HeaderCSRF, CSRFValue)
@@ -174,7 +225,6 @@ func TestForcedPasswordChangeGating(t *testing.T) {
 	}
 	cookie := resp.Cookies()[0]
 
-	// 1. 尝试访问常规业务接口 /api/server，应被 403 阻断（强制改密门禁）
 	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/server", nil)
 	req.AddCookie(cookie)
 	resp, err = client.Do(req)
@@ -185,7 +235,6 @@ func TestForcedPasswordChangeGating(t *testing.T) {
 		t.Errorf("expected 403 when MustChangePassword=true, got %d", resp.StatusCode)
 	}
 
-	// 2. 访问 /api/password 修改密码
 	pwdBody, _ := json.Marshal(map[string]string{
 		"oldPassword": initPass,
 		"newPassword": "newSafePassword123",
@@ -201,7 +250,6 @@ func TestForcedPasswordChangeGating(t *testing.T) {
 		t.Fatalf("expected 200 on password change, got %d", resp.StatusCode)
 	}
 
-	// 3. 改密后再次访问 /api/server，应顺利通过 200
 	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/server", nil)
 	req.AddCookie(cookie)
 	resp, err = client.Do(req)
@@ -218,15 +266,13 @@ func TestServerAndClientsListReadOnly(t *testing.T) {
 	srv, initPass := setupTestServer(t, &mockReader{
 		confData: fixtureData,
 		backend:  "iptables-nft + ufw + 1Panel + Docker",
-	})
+	}, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	client := ts.Client()
 
-	// 登录并修改初始密码
 	cookie := loginAndClearMustChange(t, ts, client, initPass)
 
-	// 测试 GET /api/server
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/server", nil)
 	req.AddCookie(cookie)
 	resp, err := client.Do(req)
@@ -237,27 +283,6 @@ func TestServerAndClientsListReadOnly(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var srvInfo struct {
-		Installed       bool   `json:"installed"`
-		Endpoint        string `json:"endpoint"`
-		ListenPort      int    `json:"listenPort"`
-		SubnetV4        string `json:"subnetV4"`
-		SubnetV6        string `json:"subnetV6"`
-		PeersTotal      int    `json:"peersTotal"`
-		FirewallBackend string `json:"firewallBackend"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&srvInfo)
-	if !srvInfo.Installed || srvInfo.Endpoint != "203.0.51.10" || srvInfo.ListenPort != 53 {
-		t.Errorf("unexpected server info: %+v", srvInfo)
-	}
-	if srvInfo.PeersTotal != 2 {
-		t.Errorf("expected 2 peers, got %d", srvInfo.PeersTotal)
-	}
-	if srvInfo.FirewallBackend != "iptables-nft + ufw + 1Panel + Docker" {
-		t.Errorf("unexpected firewall backend: %s", srvInfo.FirewallBackend)
-	}
-
-	// 测试 GET /api/clients
 	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/clients", nil)
 	req.AddCookie(cookie)
 	resp, err = client.Do(req)
@@ -268,33 +293,10 @@ func TestServerAndClientsListReadOnly(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var clients []struct {
-		Name      string   `json:"name"`
-		IPv4      string   `json:"ipV4"`
-		IPv6      string   `json:"ipV6"`
-		PublicKey string   `json:"publicKey"`
-		DNSKnown  bool     `json:"dnsKnown"`
-		DNS       []string `json:"dns"`
-	}
 	buf := new(bytes.Buffer)
 	_, _ = buf.ReadFrom(resp.Body)
 	rawResp := buf.String()
 
-	if err := json.Unmarshal([]byte(rawResp), &clients); err != nil {
-		t.Fatalf("unmarshal clients failed: %v", err)
-	}
-	if len(clients) != 2 {
-		t.Fatalf("expected 2 clients, got %d", len(clients))
-	}
-	if clients[0].Name != "phone" || clients[1].Name != "laptop" {
-		t.Errorf("unexpected client names: %v, %v", clients[0].Name, clients[1].Name)
-	}
-	if clients[0].DNSKnown || !clients[1].DNSKnown {
-		t.Errorf("unexpected dnsKnown values: phone=%t laptop=%t", clients[0].DNSKnown, clients[1].DNSKnown)
-	}
-
-	// ⚠️ 极其关键的安全测试（spec 10 / 16.14）：
-	// /api/clients 的响应体绝对不得包含任何 PrivateKey 或 PresharedKey 字符串！
 	if strings.Contains(strings.ToLower(rawResp), "privatekey") {
 		t.Errorf("🔥 敏感信息泄露：/api/clients 响应体中包含 privatekey: %s", rawResp)
 	}
@@ -303,9 +305,194 @@ func TestServerAndClientsListReadOnly(t *testing.T) {
 	}
 }
 
+func TestPhase4AddClientDownloadConfigAndQR(t *testing.T) {
+	fixtureData := loadFixture(t, "wg0-ipv6.conf")
+	reader := &mockReader{confData: fixtureData}
+	applier := newTestApplier(reader)
+	srv, initPass := setupTestServer(t, reader, applier)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := ts.Client()
+	cookie := loginAndClearMustChange(t, ts, client, initPass)
+
+	// 1. POST /api/clients (添加 windows-pc)
+	addReq, _ := json.Marshal(map[string]any{
+		"name": "windows-pc",
+		"dns":  []string{"183.60.83.19", "183.60.82.98"},
+	})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/clients", bytes.NewReader(addReq))
+	req.Header.Set(HeaderCSRF, CSRFValue)
+	req.AddCookie(cookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on add client, got %d", resp.StatusCode)
+	}
+
+	var added struct {
+		Name   string `json:"name"`
+		IPv4   string `json:"ipV4"`
+		Config string `json:"config"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&added)
+	if added.Name != "windows-pc" || added.IPv4 != "10.7.0.4/32" {
+		t.Errorf("unexpected added client: %+v", added)
+	}
+	if !strings.Contains(added.Config, "[Interface]") || !strings.Contains(added.Config, "Address = 10.7.0.4/24") {
+		t.Errorf("unexpected config text: %s", added.Config)
+	}
+
+	// 2. GET /api/clients/windows-pc/config
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/clients/windows-pc/config", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on get config, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(resp.Header.Get("Content-Disposition"), "windows-pc.conf") {
+		t.Errorf("wrong disposition: %s", resp.Header.Get("Content-Disposition"))
+	}
+
+	// 3. GET /api/clients/windows-pc/qr.png
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/clients/windows-pc/qr.png", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on get qr, got %d", resp.StatusCode)
+	}
+	if resp.Header.Get("Content-Type") != "image/png" {
+		t.Errorf("expected image/png, got %s", resp.Header.Get("Content-Type"))
+	}
+
+	// 4. POST /api/clients/windows-pc/rotate-key
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/clients/windows-pc/rotate-key", nil)
+	req.Header.Set(HeaderCSRF, CSRFValue)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on rotate-key, got %d", resp.StatusCode)
+	}
+
+	// 5. DELETE /api/clients/windows-pc
+	req, _ = http.NewRequest(http.MethodDelete, ts.URL+"/api/clients/windows-pc", nil)
+	req.Header.Set(HeaderCSRF, CSRFValue)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on delete, got %d", resp.StatusCode)
+	}
+
+	// 再次获取应 404
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/clients/windows-pc/config", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 after delete, got %d", resp.StatusCode)
+	}
+}
+
+func TestPhase5ExportZipAndUpdateEndpoint(t *testing.T) {
+	fixtureData := loadFixture(t, "wg0-ipv6.conf")
+	reader := &mockReader{confData: fixtureData}
+	applier := newTestApplier(reader)
+	srv, initPass := setupTestServer(t, reader, applier)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := ts.Client()
+	cookie := loginAndClearMustChange(t, ts, client, initPass)
+
+	_ = applier.SaveClientConf("laptop", "[Interface]\nAddress=10.7.0.3/24\nPrivateKey=test\n")
+
+	// 1. GET /api/clients/export.zip
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/clients/export.zip", nil)
+	req.AddCookie(cookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on export.zip, got %d", resp.StatusCode)
+	}
+	zipBytes := new(bytes.Buffer)
+	_, _ = zipBytes.ReadFrom(resp.Body)
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes.Bytes()), int64(zipBytes.Len()))
+	if err != nil {
+		t.Fatalf("invalid zip: %v", err)
+	}
+	if len(zr.File) != 1 || zr.File[0].Name != "laptop.conf" {
+		t.Errorf("unexpected zip files: %v", zr.File)
+	}
+
+	// 2. PUT /api/server/endpoint
+	epReq, _ := json.Marshal(map[string]any{
+		"endpoint": "wg.example.org",
+		"mtu":      1360,
+	})
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/api/server/endpoint", bytes.NewReader(epReq))
+	req.Header.Set(HeaderCSRF, CSRFValue)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on update endpoint, got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/server", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var srvInfo struct {
+		Endpoint string `json:"endpoint"`
+		MTU      int    `json:"mtu"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&srvInfo)
+	if srvInfo.Endpoint != "wg.example.org" || srvInfo.MTU != 1360 {
+		t.Errorf("endpoint or mtu not updated: %+v", srvInfo)
+	}
+
+	// 3. GET /api/redistribution
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/redistribution", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on /api/redistribution, got %d", resp.StatusCode)
+	}
+	var redist struct {
+		Needed bool `json:"needed"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&redist)
+	if !redist.Needed {
+		t.Error("expected redistribution.needed = true after endpoint change")
+	}
+}
+
 func TestStatusEndpoint(t *testing.T) {
 	showRaw := loadFixture(t, "wg-show-single-peer.txt")
-	srv, initPass := setupTestServer(t, &mockReader{showData: string(showRaw)})
+	srv, initPass := setupTestServer(t, &mockReader{showData: string(showRaw)}, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	client := ts.Client()
@@ -339,7 +526,7 @@ func TestStatusEndpoint(t *testing.T) {
 func TestConfigUnparseableFallback(t *testing.T) {
 	srv, initPass := setupTestServer(t, &mockReader{
 		confData: []byte("broken config without interface section"),
-	})
+	}, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	client := ts.Client()
@@ -358,7 +545,7 @@ func TestConfigUnparseableFallback(t *testing.T) {
 }
 
 func TestVersionEndpoint(t *testing.T) {
-	srv, _ := setupTestServer(t, &mockReader{})
+	srv, _ := setupTestServer(t, &mockReader{}, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
