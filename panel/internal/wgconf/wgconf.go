@@ -21,10 +21,12 @@ import (
 )
 
 const (
-	markerBegin   = "# BEGIN_PEER "
-	markerEnd     = "# END_PEER "
-	markerDNS     = "# DNS "
-	markerEndpoint = "# ENDPOINT "
+	markerBegin     = "# BEGIN_PEER "
+	markerEnd       = "# END_PEER "
+	markerDNS       = "# DNS "
+	markerEndpoint  = "# ENDPOINT "
+	markerDisabled  = "# DISABLED"
+	markerRouteMode = "# ROUTE_MODE "
 
 	minClientOctet = 2
 	maxClientOctet = 254
@@ -52,10 +54,13 @@ type Peer struct {
 	// 导出时必须明示"将使用默认值"，不能静默替换。
 	DNS       []string
 	DNSKnown  bool
-	blockLine int // 文件内 0 基行号，-1 表示未定位
+	Disabled  bool   // 是否被标记禁用
+	RouteMode string // 路由模式: "full" | "split" | "custom"
+	blockLine int    // 文件内 0 基行号，-1 表示未定位
 }
 
 // IPv4Octet 返回该 peer 的 v4 末段（10.7.0.N 的 N），没有则 0。
+// 无论 peer 是否被禁用，只要配置中预留了该 IP，就继续占位，防止 IP 碰撞。
 func (p *Peer) IPv4Octet() int {
 	for _, cidr := range p.AllowedIPs {
 		m := reV4CIDR.FindStringSubmatch(strings.TrimSpace(cidr))
@@ -223,16 +228,38 @@ func (s *Server) refreshPeers() error {
 }
 
 func (s *Server) readPeer(name string, start, end int) (Peer, error) {
-	p := Peer{Name: name, blockLine: start}
+	p := Peer{Name: name, blockLine: start, RouteMode: "full"}
 	seen := map[string]bool{}
 	for i := start + 1; i < end; i++ {
-		trimmed := strings.TrimSpace(s.lines[i])
+		rawLine := s.lines[i]
+		trimmed := strings.TrimSpace(rawLine)
+		if trimmed == markerDisabled {
+			p.Disabled = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, markerRouteMode) {
+			p.RouteMode = strings.TrimSpace(trimmed[len(markerRouteMode):])
+			continue
+		}
 		if strings.HasPrefix(trimmed, markerDNS) {
 			p.DNS = splitList(trimmed[len(markerDNS):])
 			p.DNSKnown = true
 			continue
 		}
-		k, v, ok := keyValue(s.lines[i])
+
+		// 若当前行带有 "# " 前缀，但内容是核心 Peer 配置（即禁用状态下的属性），剥离前缀解析
+		line := rawLine
+		if strings.HasPrefix(trimmed, "# ") {
+			uncommented := strings.TrimSpace(trimmed[2:])
+			if strings.HasPrefix(uncommented, "[Peer]") ||
+				strings.HasPrefix(uncommented, "PublicKey") ||
+				strings.HasPrefix(uncommented, "PresharedKey") ||
+				strings.HasPrefix(uncommented, "AllowedIPs") {
+				line = uncommented
+			}
+		}
+
+		k, v, ok := keyValue(line)
 		if !ok {
 			continue
 		}
@@ -309,15 +336,12 @@ func (s *Server) SetEndpoint(addr string) error {
 		return fmt.Errorf("wgconf: endpoint 既不是合法 IPv4 也不是 FQDN: %q", addr)
 	}
 	for i := 0; i < s.ifaceAt; i++ {
-		// FindStringSubmatchIndex 的下标成对出现：m[2],m[3] 是捕获组 1 的起止。
-		// 保留前缀要用它的"结束"位置 m[3]，之后直接换成新值（旧值与其后空白一并丢弃）。
 		if m := reEndpoint.FindStringSubmatchIndex(s.lines[i]); m != nil {
 			s.lines[i] = s.lines[i][:m[3]] + addr
 			s.Endpoint = addr
 			return nil
 		}
 	}
-	// 老配置可能没有这一行：补在 [Interface] 之前，保持 wg.sh 的文件头形状
 	insert := markerEndpoint + addr
 	s.lines = append(s.lines[:s.ifaceAt], append([]string{insert}, s.lines[s.ifaceAt:]...)...)
 	s.ifaceAt++
@@ -326,7 +350,6 @@ func (s *Server) SetEndpoint(addr string) error {
 }
 
 // AddPeer 在文件末尾追加一个 wg.sh 兼容的 peer 块。
-// dns 为空时不写 "# DNS" 行，避免把"没指定"和"默认"混为一谈。
 func (s *Server) AddPeer(name, pub, psk string, allowedIPs, dns []string) error {
 	if err := validPeerName(name); err != nil {
 		return err
@@ -358,8 +381,6 @@ func (s *Server) AddPeer(name, pub, psk string, allowedIPs, dns []string) error 
 }
 
 // RemovePeer 删除该 peer 的整个块（含首尾标记行）。
-// 精确按 [start, end] 闭区间删除、不做任何"顺手清理空行"的动作，
-// 这样 AddPeer→RemovePeer 在任意位置都是字节可逆的。
 func (s *Server) RemovePeer(name string) error {
 	start, end, ok := s.peerRange(name)
 	if !ok {
@@ -372,8 +393,59 @@ func (s *Server) RemovePeer(name string) error {
 	return s.refreshPeers()
 }
 
-// ReplacePeerKey 就地替换某个 peer 的 PublicKey 与 PresharedKey，
-// 用于 rotate-key。不改行格式，只换等号后面的值。
+// SetPeerDisabled 切换 Peer 禁用状态。
+// 禁用时注释掉该块的核心配置行并插入 # DISABLED，启用时逆向恢复。
+func (s *Server) SetPeerDisabled(name string, disabled bool) error {
+	start, end, ok := s.peerRange(name)
+	if !ok {
+		return fmt.Errorf("wgconf: 找不到 peer %s", name)
+	}
+	p, _ := s.findPeer(name)
+	if p.Disabled == disabled {
+		return nil
+	}
+
+	var newLines []string
+	if disabled {
+		newLines = append(newLines, s.lines[start]) // BEGIN_PEER
+		newLines = append(newLines, markerDisabled)
+		for i := start + 1; i < end; i++ {
+			ln := s.lines[i]
+			t := strings.TrimSpace(ln)
+			if t == "" || strings.HasPrefix(t, "#") {
+				newLines = append(newLines, ln)
+			} else {
+				newLines = append(newLines, "# "+ln)
+			}
+		}
+		newLines = append(newLines, s.lines[end]) // END_PEER
+	} else {
+		for i := start; i <= end; i++ {
+			ln := s.lines[i]
+			t := strings.TrimSpace(ln)
+			if t == markerDisabled {
+				continue
+			}
+			if strings.HasPrefix(t, "# [Peer]") || strings.HasPrefix(t, "# PublicKey") ||
+				strings.HasPrefix(t, "# PresharedKey") || strings.HasPrefix(t, "# AllowedIPs") {
+				idx := strings.Index(ln, "# ")
+				if idx >= 0 {
+					ln = ln[:idx] + ln[idx+2:]
+				}
+			}
+			newLines = append(newLines, ln)
+		}
+	}
+
+	kept := make([]string, 0, len(s.lines)-(end-start+1)+len(newLines))
+	kept = append(kept, s.lines[:start]...)
+	kept = append(kept, newLines...)
+	kept = append(kept, s.lines[end+1:]...)
+	s.lines = kept
+	return s.refreshPeers()
+}
+
+// ReplacePeerKey 就地替换某个 peer 的 PublicKey 与 PresharedKey。
 func (s *Server) ReplacePeerKey(name, pub, psk string) error {
 	start, end, ok := s.peerRange(name)
 	if !ok {
@@ -400,7 +472,7 @@ func (s *Server) ReplacePeerKey(name, pub, psk string) error {
 	return s.refreshPeers()
 }
 
-// SetPeerDNS 改写 peer 块内的 "# DNS" 注释行；不存在则插入到 BEGIN 标记之后。
+// SetPeerDNS 改写 peer 块内的 "# DNS" 注释行。
 func (s *Server) SetPeerDNS(name string, dns []string) error {
 	start, _, ok := s.peerRange(name)
 	if !ok {
@@ -410,9 +482,30 @@ func (s *Server) SetPeerDNS(name string, dns []string) error {
 	for i := start + 1; i < len(s.lines); i++ {
 		t := strings.TrimSpace(s.lines[i])
 		if strings.HasPrefix(t, markerEnd) {
-			break // 块内没有 # DNS，插到 BEGIN 行之后
+			break
 		}
 		if strings.HasPrefix(t, markerDNS) {
+			s.lines[i] = line
+			return s.refreshPeers()
+		}
+	}
+	s.lines = append(s.lines[:start+1], append([]string{line}, s.lines[start+1:]...)...)
+	return s.refreshPeers()
+}
+
+// SetPeerRouteMode 记录该 Peer 的默认路由模式（full / split / custom）。
+func (s *Server) SetPeerRouteMode(name, mode string) error {
+	start, _, ok := s.peerRange(name)
+	if !ok {
+		return fmt.Errorf("wgconf: 找不到 peer %s", name)
+	}
+	line := markerRouteMode + mode
+	for i := start + 1; i < len(s.lines); i++ {
+		t := strings.TrimSpace(s.lines[i])
+		if strings.HasPrefix(t, markerEnd) {
+			break
+		}
+		if strings.HasPrefix(t, markerRouteMode) {
 			s.lines[i] = line
 			return s.refreshPeers()
 		}
@@ -452,9 +545,6 @@ func (s *Server) peerRange(name string) (start, end int, ok bool) {
 }
 
 func (s *Server) appendBlock(block []string) error {
-	// lines 末元素通常是尾换行造成的空串：插在其前，保住文件末尾的单换行。
-	// 刻意不在 peer 之间插入空行 —— wg.sh 的 new_client 用 cat >> 追加时不留空行，
-	// 保持同一种形状才能让 AddPeer→RemovePeer 字节可逆。
 	at := len(s.lines)
 	if at > 0 && s.lines[at-1] == "" {
 		at--
@@ -476,7 +566,6 @@ func (s *Server) setIfaceKey(key, value string) error {
 			return nil
 		}
 	}
-	// 该键原先不存在（如首次设 MTU）：插到 [Interface] 段末尾
 	ins := end
 	for ins > s.ifaceAt+1 && strings.TrimSpace(s.lines[ins-1]) == "" {
 		ins--
@@ -498,13 +587,11 @@ func (s *Server) deleteIfaceKey(key string) error {
 	return nil
 }
 
-// setValue 替换等号后的值，保留原有的空白与等号两侧风格。
 func setValue(line, value string) string {
 	m := reKeySimple.FindStringSubmatchIndex(line)
 	if m == nil {
 		return line
 	}
-	// m[4]:m[5] 是值的区间；把它换成 value，尾部空白由 m[6]:m[7] 保留
 	return line[:m[4]] + value + line[m[6]:]
 }
 

@@ -84,3 +84,41 @@ func TestClientConfStorage(t *testing.T) {
 		t.Fatal("删除后读取应该报错")
 	}
 }
+
+func TestBackupListAndRestore(t *testing.T) {
+	dir := t.TempDir()
+	confPath := filepath.Join(dir, "wg0.conf")
+	backupDir := filepath.Join(dir, "backups")
+	stateDir := filepath.Join(dir, "state")
+
+	a := NewRealApplier(confPath, "wg0", backupDir, stateDir)
+
+	validConf := "[Interface]\nPrivateKey = wFxSCo8a5+PoZcKx8Q+LoS31VBMGOmztUUTcqi5hl0c=\nListenPort = 53\n"
+	_ = a.WriteAtomic([]byte(validConf))
+	bakPath, err := a.Backup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	baks, err := a.ListBackups()
+	if err != nil || len(baks) != 1 {
+		t.Fatalf("expected 1 backup, got %d (err: %v)", len(baks), err)
+	}
+
+	content, err := a.GetBackup(filepath.Base(bakPath))
+	if err != nil || string(content) != validConf {
+		t.Fatalf("unexpected backup content: %s", string(content))
+	}
+
+	// 路径穿越攻击防御测试
+	if _, err := a.GetBackup("../../../etc/passwd"); err == nil {
+		t.Error("path traversal should be blocked")
+	}
+
+	// 恢复损坏的备份应当报错
+	brokenBak := filepath.Join(backupDir, "wg0.conf.broken.bak")
+	_ = os.WriteFile(brokenBak, []byte("broken content"), 0600)
+	if err := a.RestoreBackup("wg0.conf.broken.bak"); err == nil {
+		t.Error("restoring broken config must fail")
+	}
+}

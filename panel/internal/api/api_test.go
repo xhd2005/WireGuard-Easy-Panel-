@@ -69,6 +69,22 @@ func (a *testApplier) Backup() (string, error) {
 	return bak, nil
 }
 
+func (a *testApplier) ListBackups() ([]apply.BackupInfo, error) {
+	var list []apply.BackupInfo
+	for _, b := range a.backups {
+		list = append(list, apply.BackupInfo{Filename: b, CreatedAt: time.Now(), Size: 100})
+	}
+	return list, nil
+}
+
+func (a *testApplier) GetBackup(filename string) ([]byte, error) {
+	return a.reader.confData, nil
+}
+
+func (a *testApplier) RestoreBackup(filename string) error {
+	return nil
+}
+
 func (a *testApplier) WriteAtomic(data []byte) error {
 	a.reader.confData = data
 	return nil
@@ -405,6 +421,126 @@ func TestPhase4AddClientDownloadConfigAndQR(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404 after delete, got %d", resp.StatusCode)
+	}
+}
+
+func TestPhase2NewEndpoints(t *testing.T) {
+	fixtureData := loadFixture(t, "wg0-ipv6.conf")
+	reader := &mockReader{confData: fixtureData}
+	applier := newTestApplier(reader)
+	srv, initPass := setupTestServer(t, reader, applier)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := ts.Client()
+	cookie := loginAndClearMustChange(t, ts, client, initPass)
+
+	// 1. GET /api/system/stats
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/system/stats", nil)
+	req.AddCookie(cookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on /api/system/stats, got %d", resp.StatusCode)
+	}
+
+	// 2. PUT /api/clients/phone/disable
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/api/clients/phone/disable", nil)
+	req.Header.Set(HeaderCSRF, CSRFValue)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on disable, got %d", resp.StatusCode)
+	}
+
+	// 验证 /api/clients 显示 disabled=true
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/clients", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clients []struct {
+		Name     string `json:"name"`
+		Disabled bool   `json:"disabled"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&clients)
+	if len(clients) < 1 || !clients[0].Disabled {
+		t.Errorf("expected phone to be disabled: %+v", clients)
+	}
+
+	// 3. PUT /api/clients/phone/enable
+	req, _ = http.NewRequest(http.MethodPut, ts.URL+"/api/clients/phone/enable", nil)
+	req.Header.Set(HeaderCSRF, CSRFValue)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on enable, got %d", resp.StatusCode)
+	}
+
+	// 4. GET /api/clients/phone/config?mode=split (测试分流 AllowedIPs)
+	_ = applier.SaveClientConf("phone", "[Interface]\nAddress = 10.7.0.2/24\nPrivateKey = test\n\n[Peer]\nAllowedIPs = 0.0.0.0/0, ::/0\n")
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/clients/phone/config?mode=split", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := new(bytes.Buffer)
+	_, _ = buf.ReadFrom(resp.Body)
+	if !strings.Contains(buf.String(), "AllowedIPs = 10.7.0.0/24") {
+		t.Errorf("split mode should use 10.7.0.0/24: %s", buf.String())
+	}
+
+	// 5. 备份管理端点测试
+	// POST /api/backups (创建即时快照)
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/api/backups", nil)
+	req.Header.Set(HeaderCSRF, CSRFValue)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on create backup, got %d", resp.StatusCode)
+	}
+
+	// GET /api/backups (获取备份列表)
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/api/backups", nil)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on list backups, got %d", resp.StatusCode)
+	}
+	var backups []struct {
+		Filename string `json:"filename"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&backups)
+	if len(backups) == 0 {
+		t.Fatal("expected at least 1 backup in list")
+	}
+
+	// POST /api/backups/{filename}/restore (测试恢复)
+	restoreURL := fmt.Sprintf("%s/api/backups/%s/restore", ts.URL, backups[0].Filename)
+	req, _ = http.NewRequest(http.MethodPost, restoreURL, nil)
+	req.Header.Set(HeaderCSRF, CSRFValue)
+	req.AddCookie(cookie)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on restore backup, got %d", resp.StatusCode)
 	}
 }
 

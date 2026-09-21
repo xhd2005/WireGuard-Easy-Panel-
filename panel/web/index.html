@@ -3,117 +3,267 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WireGuard 管理面板</title>
+  <title>WireGuard 管理控制台</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --card-border: #334155;
+      --bg: #0b0f19;
+      --card-bg: #131d2e;
+      --card-hover: #172439;
+      --card-border: #1e293b;
       --text: #f8fafc;
       --text-muted: #94a3b8;
+      --text-sub: #64748b;
       --primary: #3b82f6;
       --primary-hover: #2563eb;
+      --primary-light: rgba(59, 130, 246, 0.15);
       --danger: #ef4444;
       --danger-hover: #dc2626;
+      --danger-light: rgba(239, 68, 68, 0.15);
       --warning: #f59e0b;
+      --warning-light: rgba(245, 158, 11, 0.15);
       --success: #10b981;
-      --radius: 8px;
+      --success-light: rgba(16, 185, 129, 0.15);
+      --radius: 10px;
+      --radius-sm: 6px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", sans-serif;
       background-color: var(--bg);
       color: var(--text);
       line-height: 1.5;
       padding: 1rem;
       min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
     }
-    .container { max-width: 1060px; margin: 0 auto; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    
+    /* Header */
     header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 1rem 0 2rem;
+      padding: 1rem 0 1.5rem;
       border-bottom: 1px solid var(--card-border);
       margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      gap: 1rem;
     }
-    h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem; }
+    .brand-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      letter-spacing: -0.02em;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
     .badge {
       font-size: 0.75rem;
-      padding: 0.2rem 0.6rem;
+      padding: 0.15rem 0.55rem;
       border-radius: 9999px;
       font-weight: 600;
-      background: #0284c7;
+      background: var(--primary-light);
+      color: #60a5fa;
+      border: 1px solid rgba(96, 165, 250, 0.3);
     }
+    
+    /* Buttons */
     .btn {
       background: var(--primary);
       color: #fff;
       border: none;
-      padding: 0.5rem 1rem;
-      border-radius: var(--radius);
+      padding: 0.5rem 0.9rem;
+      border-radius: var(--radius-sm);
       cursor: pointer;
       font-weight: 500;
-      font-size: 0.875rem;
-      transition: background 0.15s ease;
+      font-size: 0.85rem;
+      transition: all 0.15s ease;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.25rem;
+      gap: 0.35rem;
+      white-space: nowrap;
     }
-    .btn:hover { background: var(--primary-hover); }
-    .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
-    .btn-secondary { background: #475569; }
-    .btn-secondary:hover { background: #334155; }
+    .btn:hover { background: var(--primary-hover); transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn-sm { padding: 0.3rem 0.65rem; font-size: 0.78rem; border-radius: 4px; }
+    .btn-secondary { background: #263345; color: #cbd5e1; border: 1px solid var(--card-border); }
+    .btn-secondary:hover { background: #334155; color: #fff; }
     .btn-danger { background: var(--danger); }
     .btn-danger:hover { background: var(--danger-hover); }
     .btn-success { background: #059669; }
     .btn-success:hover { background: #047857; }
+    .btn-warning { background: var(--warning); color: #000; }
+    .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid transparent; }
+    .btn-ghost:hover { background: rgba(255,255,255,0.05); color: #fff; }
+
+    /* Cards */
     .card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
       border-radius: var(--radius);
       padding: 1.25rem;
-      margin-bottom: 1.5rem;
+      margin-bottom: 1.25rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
     }
     .card-title {
-      font-size: 1.1rem;
+      font-size: 1.05rem;
+      font-weight: 600;
       margin-bottom: 1rem;
       color: var(--text);
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 0.5rem;
+      gap: 0.6rem;
     }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
-    .info-item label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem; }
-    .info-item span { font-weight: 600; font-size: 1rem; word-break: break-all; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.85rem; }
+    .info-item {
+      background: rgba(15, 23, 42, 0.4);
+      padding: 0.75rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+    }
+    .info-item label { display: block; font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+    .info-item span { font-weight: 600; font-size: 0.95rem; word-break: break-all; }
+
+    /* Progress bar */
+    .progress-wrap { width: 100%; height: 6px; background: #263345; border-radius: 3px; overflow: hidden; margin-top: 0.4rem; }
+    .progress-bar { height: 100%; background: var(--primary); transition: width 0.3s ease; }
+    .progress-bar.warn { background: var(--warning); }
+    .progress-bar.danger { background: var(--danger); }
+
+    /* Banners */
     .banner {
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid var(--warning);
+      background: var(--warning-light);
+      border: 1px solid rgba(245, 158, 11, 0.4);
       color: #fbbf24;
-      padding: 1rem;
+      padding: 0.85rem 1rem;
       border-radius: var(--radius);
-      margin-bottom: 1.5rem;
+      margin-bottom: 1.25rem;
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 0.75rem;
-      font-size: 0.9rem;
+      font-size: 0.85rem;
     }
-    table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
-    th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid var(--card-border); font-size: 0.875rem; }
-    th { color: var(--text-muted); font-weight: 500; }
-    .peer-key { font-family: monospace; font-size: 0.8rem; color: var(--text-muted); }
+    
+    /* Filter Bar */
+    .filter-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .search-box {
+      position: relative;
+      flex: 1;
+      min-width: 200px;
+    }
+    .search-box svg {
+      position: absolute;
+      left: 0.7rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+    .search-input {
+      width: 100%;
+      padding: 0.45rem 0.8rem 0.45rem 2.2rem;
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-sm);
+      color: #fff;
+      font-size: 0.82rem;
+    }
+    .search-input:focus { outline: none; border-color: var(--primary); }
+    .filter-tabs { display: flex; gap: 0.25rem; background: #0f172a; padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--card-border); }
+    .filter-tab {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.3rem 0.7rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .filter-tab.active { background: #1e293b; color: #fff; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; margin-top: 0.25rem; }
+    th, td { padding: 0.75rem 0.6rem; text-align: left; border-bottom: 1px solid var(--card-border); font-size: 0.82rem; }
+    th { color: var(--text-muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+    .peer-key { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.75rem; color: var(--text-muted); }
     .status-dot {
       display: inline-block;
-      width: 8px;
-      height: 8px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
-      margin-right: 0.4rem;
+      margin-right: 0.35rem;
     }
-    .status-online { background: var(--success); }
+    .status-online { background: var(--success); box-shadow: 0 0 8px rgba(16,185,129,0.5); }
     .status-offline { background: #64748b; }
+    .status-disabled { background: var(--danger); }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+    }
+    .status-pill.online { background: var(--success-light); color: #34d399; }
+    .status-pill.offline { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+    .status-pill.disabled { background: var(--danger-light); color: #f87171; }
+    .actions-cell { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+
+    /* Toast System */
+    #toast-container {
+      position: fixed;
+      top: 1.25rem;
+      right: 1.25rem;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      min-width: 260px;
+      max-width: 360px;
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      animation: slideIn 0.2s ease forwards;
+    }
+    .toast-success { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; }
+    .toast-error { background: #4c0519; color: #fca5a5; border: 1px solid #e11d48; }
+    .toast-warning { background: #451a03; color: #fcd34d; border: 1px solid #d97706; }
+    .toast-info { background: #0c4a6e; color: #7dd3fc; border: 1px solid #0284c7; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    /* Modals & Forms */
     .login-box {
       max-width: 420px;
       margin: 10vh auto;
@@ -121,78 +271,160 @@
       border: 1px solid var(--card-border);
       padding: 2rem;
       border-radius: var(--radius);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
     }
-    .form-group { margin-bottom: 1rem; }
-    .form-group label { display: block; margin-bottom: 0.5rem; font-size: 0.875rem; color: var(--text-muted); }
+    .form-group { margin-bottom: 1rem; text-align: left; }
+    .form-group label { display: block; margin-bottom: 0.35rem; font-size: 0.8rem; color: var(--text-muted); }
     .form-control {
       width: 100%;
-      padding: 0.6rem 0.8rem;
+      padding: 0.55rem 0.8rem;
       background: #0f172a;
       border: 1px solid var(--card-border);
-      border-radius: var(--radius);
+      border-radius: var(--radius-sm);
       color: #fff;
-      font-size: 0.875rem;
+      font-size: 0.85rem;
     }
     .form-control:focus { outline: none; border-color: var(--primary); }
-    .error-msg {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid var(--danger);
-      color: #f87171;
-      padding: 0.6rem;
-      border-radius: var(--radius);
-      font-size: 0.85rem;
-      margin-bottom: 1rem;
-    }
-    .hidden { display: none !important; }
     .modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.75);
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(4px);
       display: flex; align-items: center; justify-content: center;
-      z-index: 99;
+      z-index: 100;
       padding: 1rem;
     }
-    .actions-cell { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .modal-content {
+      width: 100%;
+      max-width: 520px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.25rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .modal-header h3 { font-size: 1.1rem; }
     pre.code-box {
-      background: #090d16;
+      background: #080c14;
       border: 1px solid #1e293b;
       padding: 0.75rem;
-      border-radius: 6px;
-      font-family: monospace;
-      font-size: 0.8rem;
-      max-height: 200px;
+      border-radius: var(--radius-sm);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.75rem;
+      max-height: 180px;
       overflow-y: auto;
       white-space: pre-wrap;
       word-break: break-all;
       color: #38bdf8;
     }
+    .mode-toggle {
+      display: flex;
+      background: #0f172a;
+      padding: 0.25rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--card-border);
+      margin-bottom: 1rem;
+      gap: 0.25rem;
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 0.4rem;
+      font-size: 0.78rem;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    .mode-btn.active { background: var(--primary); color: #fff; }
+    .hidden { display: none !important; }
+
+    /* Mobile Responsive Card Stack */
+    @media (max-width: 768px) {
+      body { padding: 0.5rem; }
+      .container { width: 100%; }
+      header { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+      .grid { grid-template-columns: repeat(2, 1fr); }
+      table, thead, tbody, th, td, tr { display: block; }
+      thead tr { position: absolute; top: -9999px; left: -9999px; }
+      tbody tr {
+        background: rgba(15, 23, 42, 0.4);
+        border: 1px solid var(--card-border);
+        border-radius: var(--radius-sm);
+        margin-bottom: 0.75rem;
+        padding: 0.75rem;
+      }
+      td {
+        border-bottom: none;
+        padding: 0.35rem 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      td:before {
+        content: attr(data-label);
+        font-weight: 500;
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        text-transform: uppercase;
+      }
+      td.actions-cell {
+        margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        justify-content: flex-end;
+      }
+    }
   </style>
 </head>
 <body>
+  <div id="toast-container"></div>
+
   <!-- 登录视图 -->
   <div id="login-view" class="login-box hidden">
-    <h2 style="margin-bottom: 1.5rem; text-align: center;">WireGuard 登录</h2>
-    <div id="login-error" class="error-msg hidden"></div>
+    <div style="text-align: center; margin-bottom: 1.5rem;">
+      <div class="brand-icon" style="margin: 0 auto 0.75rem; width: 42px; height: 42px;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <h2>WireGuard 管理登录</h2>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem;">轻量、安全、高效的组网与隧道控制台</p>
+    </div>
     <form id="login-form">
       <div class="form-group">
-        <label for="username">用户名</label>
+        <label for="username">管理员账号</label>
         <input type="text" id="username" class="form-control" value="admin" required autocomplete="username">
       </div>
       <div class="form-group">
         <label for="password">密码</label>
-        <input type="password" id="password" class="form-control" required autocomplete="current-password">
+        <input type="password" id="password" class="form-control" required autocomplete="current-password" placeholder="请输入管理员密码">
       </div>
-      <button type="submit" class="btn" style="width: 100%; margin-top: 0.5rem;">登 录</button>
+      <button type="submit" class="btn" style="width: 100%; margin-top: 0.5rem; padding: 0.65rem;">
+        <span>立即登 录</span>
+      </button>
     </form>
   </div>
 
   <!-- 改密弹窗 -->
   <div id="pwd-modal" class="modal hidden">
-    <div class="login-box" style="margin: 0; width: 100%;">
-      <h3 style="margin-bottom: 1rem;">修改密码</h3>
-      <p id="pwd-notice" style="font-size: 0.85rem; color: var(--warning); margin-bottom: 1rem;" class="hidden">
-        ⚠️ 首次登录必须先修改初始密码！
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>修改管理员密码</h3>
+        <button type="button" class="btn btn-ghost btn-sm close-modal-btn">&times;</button>
+      </div>
+      <p id="pwd-notice" style="font-size: 0.82rem; color: var(--warning); margin-bottom: 1rem;" class="hidden">
+        ⚠️ 首次登录必须先修改系统随机初始密码！
       </p>
-      <div id="pwd-error" class="error-msg hidden"></div>
       <form id="pwd-form">
         <div class="form-group">
           <label for="old-pwd">原密码</label>
@@ -202,7 +434,7 @@
           <label for="new-pwd">新密码（至少 8 位）</label>
           <input type="password" id="new-pwd" class="form-control" minlength="8" required>
         </div>
-        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;">
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.25rem;">
           <button type="button" id="pwd-cancel-btn" class="btn btn-secondary">取消</button>
           <button type="submit" class="btn">确认修改</button>
         </div>
@@ -212,17 +444,25 @@
 
   <!-- 添加客户端弹窗 -->
   <div id="add-client-modal" class="modal hidden">
-    <div class="login-box" style="margin: 0; width: 100%; max-width: 480px;">
-      <h3 style="margin-bottom: 1rem;">添加客户端</h3>
-      <div id="add-client-error" class="error-msg hidden"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>添加新客户端</h3>
+        <button type="button" class="btn btn-ghost btn-sm close-modal-btn">&times;</button>
+      </div>
       <form id="add-client-form">
         <div class="form-group">
-          <label for="client-name">客户端名称（如 windows-pc, phone）</label>
-          <input type="text" id="client-name" class="form-control" placeholder="1-15位字母/数字/下划线/短横线" pattern="^[A-Za-z0-9_-]{1,15}$" required>
+          <label for="client-name">客户端名称（标识符）</label>
+          <input type="text" id="client-name" class="form-control" placeholder="如 windows-pc, phone, macbook" pattern="^[A-Za-z0-9_-]{1,15}$" required>
+          <small style="color: var(--text-sub); font-size: 0.72rem;">1-15位字母、数字、下划线或短横线</small>
         </div>
         <div class="form-group">
-          <label for="client-dns">DNS 服务器（多个用逗号隔开，留空使用腾讯云内网DNS）</label>
-          <input type="text" id="client-dns" class="form-control" placeholder="例如: 183.60.83.19, 183.60.82.98">
+          <label for="client-dns">DNS 配置预设</label>
+          <select id="client-dns-preset" class="form-control" style="margin-bottom: 0.4rem;">
+            <option value="1.1.1.1, 8.8.8.8">公共中立 (Cloudflare / Google: 1.1.1.1, 8.8.8.8)</option>
+            <option value="223.5.5.5, 119.29.29.29">国内优选 (阿里 / 腾讯公共DNS: 223.5.5.5, 119.29.29.29)</option>
+            <option value="custom">自定义输入...</option>
+          </select>
+          <input type="text" id="client-dns" class="form-control hidden" placeholder="例如: 1.1.1.1, 8.8.8.8">
         </div>
         <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
           <button type="button" id="add-client-cancel-btn" class="btn btn-secondary">取消</button>
@@ -234,113 +474,231 @@
 
   <!-- 查看/导出客户端配置与二维码弹窗 -->
   <div id="client-qr-modal" class="modal hidden">
-    <div class="login-box" style="margin: 0; width: 100%; max-width: 520px; text-align: center;">
-      <h3 id="qr-modal-title" style="margin-bottom: 1rem;">客户端配置与二维码</h3>
-      <div style="margin-bottom: 1rem;">
-        <img id="qr-image" src="" alt="WireGuard QR Code" style="background:#fff; padding:10px; border-radius:8px; max-width: 260px; height: auto;">
+    <div class="modal-content" style="text-align: center;">
+      <div class="modal-header" style="text-align: left;">
+        <h3 id="qr-modal-title">客户端配置与二维码</h3>
+        <button type="button" class="btn btn-ghost btn-sm close-modal-btn">&times;</button>
       </div>
-      <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">手机 WireGuard App 直接扫描上方二维码即可导入连接</p>
-      
+
+      <!-- 分流与全局路由模式切换器 -->
+      <div class="mode-toggle">
+        <button type="button" class="mode-btn active" id="mode-full-btn">🌐 全局代理模式 (0.0.0.0/0)</button>
+        <button type="button" class="mode-btn" id="mode-split-btn">🔀 内网分流模式 (仅组网子网)</button>
+      </div>
+      <p id="mode-desc" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1rem; text-align: left;">
+        <strong>全局模式</strong>：所有上网流量经本服务器中转；若服务器带宽有限，看视频下载可能会受限。
+      </p>
+
+      <div style="margin: 0.5rem 0 1rem; display: inline-block; background: #fff; padding: 10px; border-radius: 8px;">
+        <img id="qr-image" src="" alt="WireGuard QR Code" style="display: block; width: 220px; height: 220px;">
+      </div>
+      <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem;">手机 WireGuard App 扫码即可瞬间连通</p>
+
       <div style="text-align: left; margin-bottom: 1rem;">
-        <label style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem; display:block;">配置文件内容（.conf）：</label>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+          <label style="font-size: 0.75rem; color: var(--text-muted);">配置文件代码 (.conf)：</label>
+          <span id="copy-status" style="font-size: 0.75rem; color: var(--success);" class="hidden">已复制到剪贴板 ✓</span>
+        </div>
         <pre id="conf-preview" class="code-box"></pre>
       </div>
 
       <div style="display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
-        <button id="copy-conf-btn" class="btn btn-secondary">复制配置文本</button>
-        <a id="download-conf-btn" href="#" download="" class="btn">下载 .conf 文件</a>
-        <button type="button" id="qr-modal-close-btn" class="btn btn-secondary">关闭</button>
+        <button id="copy-conf-btn" class="btn btn-secondary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span>复制配置文本</span>
+        </button>
+        <a id="download-conf-btn" href="#" download="" class="btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span>下载 .conf</span>
+        </a>
       </div>
     </div>
   </div>
 
   <!-- 编辑服务端端点/端口弹窗 -->
   <div id="edit-server-modal" class="modal hidden">
-    <div class="login-box" style="margin: 0; width: 100%; max-width: 480px;">
-      <h3 style="margin-bottom: 1rem;">修改服务器端点与端口</h3>
-      <p style="font-size: 0.8rem; color: var(--warning); margin-bottom: 1rem;">
-        ⚠️ 修改监听端口或公网端点后，所有存量客户端必须重新导入最新配置才能恢复连接！
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>修改服务器网络配置</h3>
+        <button type="button" class="btn btn-ghost btn-sm close-modal-btn">&times;</button>
+      </div>
+      <p style="font-size: 0.78rem; color: var(--warning); margin-bottom: 1rem;">
+        ⚠️ 修改监听端口或公网端点后，所有存量客户端必须重新导入配置方可恢复通信！
       </p>
-      <div id="edit-server-error" class="error-msg hidden"></div>
       <form id="edit-server-form">
         <div class="form-group">
-          <label for="srv-endpoint-input">公网端点 (Endpoint / 域名或IP)</label>
+          <label for="srv-endpoint-input">公网端点 (Endpoint / 域名或外网IP)</label>
           <input type="text" id="srv-endpoint-input" class="form-control" required>
         </div>
         <div class="form-group">
-          <label for="srv-port-input">监听端口 (UDP，1-65535)</label>
+          <label for="srv-port-input">WireGuard UDP 监听端口</label>
           <input type="number" id="srv-port-input" class="form-control" min="1" max="65535" required>
         </div>
         <div class="form-group">
-          <label for="srv-mtu-input">MTU（默认 1420，网络较差/跨洋丢包严重可尝试 1280）</label>
+          <label for="srv-mtu-input">MTU 大小优化</label>
           <select id="srv-mtu-input" class="form-control">
-            <option value="1420">1420 (标准推荐)</option>
-            <option value="1360">1360 (抗中度分片)</option>
-            <option value="1280">1280 (IPv6 最小标准 / 严苛网络)</option>
+            <option value="1420">1420 (标准公网默认)</option>
+            <option value="1360">1360 (抗 PPPoE 分片推荐)</option>
+            <option value="1280">1280 (跨洋高丢包/严苛网络终极抗分片)</option>
           </select>
         </div>
         <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
           <button type="button" id="edit-server-cancel-btn" class="btn btn-secondary">取消</button>
-          <button type="submit" class="btn">保存并生效</button>
+          <button type="submit" class="btn" id="edit-server-submit-btn">保存并生效</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- 历史配置备份与回滚弹窗 -->
+  <div id="backups-modal" class="modal hidden">
+    <div class="modal-content" style="max-width: 620px;">
+      <div class="modal-header">
+        <h3>配置文件历史备份与恢复</h3>
+        <button type="button" class="btn btn-ghost btn-sm close-modal-btn">&times;</button>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+        <span style="font-size: 0.78rem; color: var(--text-muted);">每次修改前系统自动保留历史快照（最多保留 20 份）</span>
+        <button type="button" id="create-snapshot-btn" class="btn btn-sm btn-secondary">+ 立即创建快照</button>
+      </div>
+      <div style="max-height: 280px; overflow-y: auto; border: 1px solid var(--card-border); border-radius: var(--radius-sm);">
+        <table>
+          <thead>
+            <tr>
+              <th>备份时间</th>
+              <th>文件名</th>
+              <th>Peer数</th>
+              <th>大小</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="backups-table-body">
+            <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
   <!-- 主控制台仪表盘 -->
   <div id="dashboard-view" class="container hidden">
     <header>
-      <h1>WireGuard 控制面板 <span class="badge" id="version-badge">v0.1.0</span></h1>
+      <div class="brand-title">
+        <div class="brand-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <span>WireGuard 控制中心</span>
+        <span class="badge" id="version-badge">v1.0.0</span>
+      </div>
       <div style="display: flex; gap: 0.5rem; align-items: center;">
-        <button id="change-pwd-btn" class="btn btn-secondary" style="font-size: 0.8rem;">修改密码</button>
-        <button id="logout-btn" class="btn btn-danger" style="font-size: 0.8rem;">登出</button>
+        <button id="open-backups-btn" class="btn btn-secondary btn-sm" title="备份历史">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>备份管理</span>
+        </button>
+        <button id="change-pwd-btn" class="btn btn-secondary btn-sm">修改密码</button>
+        <button id="logout-btn" class="btn btn-danger btn-sm">登出</button>
       </div>
     </header>
 
     <!-- 重分发提示横幅 (Spec Section 8) -->
     <div id="redistribute-warning" class="banner hidden">
-      <div>⚠️</div>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       <div style="flex: 1;">
-        <strong>配置待重分发提醒：</strong>服务器对外端点、端口或 MTU 曾发生过变更。请下载最新配置或扫描最新二维码为客户端更新配置，客户端一旦握手成功本提示将自动解除。
+        <strong>参数已变更提醒：</strong>服务端的端点或端口曾被修改。未重连的客户端需要导入新配置方可连通，一旦连上握手本提醒自动解除。
       </div>
-      <a href="/api/clients/export.zip" class="btn btn-sm" style="background:var(--warning); color:#000; font-weight:600;">打包下载全部配置 (.zip)</a>
+      <a href="/api/clients/export.zip" class="btn btn-sm btn-warning">打包下载全量配置 (.zip)</a>
     </div>
 
     <!-- 防火墙提示横幅 (Spec Section 4.2) -->
     <div id="firewall-warning" class="banner hidden">
-      <div>⚠️</div>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <div>
-        <strong>云控制台防火墙未放行提醒：</strong>检测到当前全部客户端从未握手连接。
-        若您部署在腾讯云等云服务器上，请务必检查云控制台的<strong>安全组 / 防火墙规则</strong>是否已放行本服务器当前的 WireGuard UDP 端口！
+        <strong>云控制台防火墙未放行提醒：</strong>当前全部客户端从未握手连接。
+        若部署在腾讯云/阿里云等主机上，请检查云控制台的<strong>安全组规则</strong>是否放行了本机的 WireGuard UDP 端口！
+      </div>
+    </div>
+
+    <!-- 主机与系统健康监控卡片 -->
+    <div class="card">
+      <div class="card-title">
+        <span>系统健康与网络指标</span>
+        <button id="refresh-btn" class="btn btn-ghost btn-sm" title="刷新状态">
+          <svg id="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          <span>实时刷新</span>
+        </button>
+      </div>
+      <div class="grid">
+        <div class="info-item">
+          <label>CPU 负载 (<span id="sys-cores">-</span> 核)</label>
+          <span id="sys-cpu">- %</span>
+          <div class="progress-wrap"><div id="sys-cpu-bar" class="progress-bar" style="width:0%"></div></div>
+        </div>
+        <div class="info-item">
+          <label>内存占用 (<span id="sys-mem-text">-</span>)</label>
+          <span id="sys-mem">- %</span>
+          <div class="progress-wrap"><div id="sys-mem-bar" class="progress-bar" style="width:0%"></div></div>
+        </div>
+        <div class="info-item">
+          <label>磁盘空间 (<span id="sys-disk-text">-</span>)</label>
+          <span id="sys-disk">- %</span>
+          <div class="progress-wrap"><div id="sys-disk-bar" class="progress-bar" style="width:0%"></div></div>
+        </div>
+        <div class="info-item">
+          <label>系统正常运行时间</label>
+          <span id="sys-uptime">-</span>
+        </div>
       </div>
     </div>
 
     <!-- 服务器状态卡片 -->
     <div class="card">
       <div class="card-title">
-        <span>服务器运行状态</span>
-        <div style="display:flex; gap:0.5rem;">
-          <button id="edit-srv-btn" class="btn btn-secondary btn-sm">修改端点/端口</button>
-          <a href="/api/clients/export.zip" class="btn btn-secondary btn-sm">导出全部 (.zip)</a>
-          <button id="refresh-btn" class="btn btn-secondary btn-sm">刷新</button>
+        <span>WireGuard 节点参数</span>
+        <div style="display:flex; gap:0.4rem;">
+          <button id="edit-srv-btn" class="btn btn-secondary btn-sm">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            <span>修改端点/端口</span>
+          </button>
+          <a href="/api/clients/export.zip" class="btn btn-secondary btn-sm">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>导出全部 (.zip)</span>
+          </a>
         </div>
       </div>
       <div class="grid">
-        <div class="info-item"><label>公网端点 (Endpoint)</label><span id="srv-endpoint">-</span></div>
-        <div class="info-item"><label>监听端口 (UDP)</label><span id="srv-port">-</span></div>
-        <div class="info-item"><label>IPv4 虚拟网段</label><span id="srv-subnet4">-</span></div>
-        <div class="info-item"><label>IPv6 虚拟网段</label><span id="srv-subnet6">-</span></div>
-        <div class="info-item"><label>MTU 设定</label><span id="srv-mtu">-</span></div>
-        <div class="info-item"><label>宿主防火墙</label><span id="srv-firewall">-</span></div>
+        <div class="info-item"><label>公网通信端点</label><span id="srv-endpoint">-</span></div>
+        <div class="info-item"><label>UDP 监听端口</label><span id="srv-port">-</span></div>
+        <div class="info-item"><label>IPv4 组网网段</label><span id="srv-subnet4">-</span></div>
+        <div class="info-item"><label>IPv6 组网网段</label><span id="srv-subnet6">-</span></div>
+        <div class="info-item"><label>MTU 限制</label><span id="srv-mtu">-</span></div>
+        <div class="info-item"><label>主机防火墙</label><span id="srv-firewall">-</span></div>
       </div>
     </div>
 
     <!-- 客户端列表卡片 -->
     <div class="card">
       <div class="card-title">
-        <span>客户端连接管理 (<span id="clients-count">0</span>)</span>
-        <button id="add-client-btn" class="btn btn-success btn-sm">+ 添加客户端</button>
+        <span>客户端列表 (<span id="clients-count">0</span>)</span>
+        <button id="add-client-btn" class="btn btn-success btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>添加客户端</span>
+        </button>
       </div>
+
+      <!-- 搜索与状态过滤 -->
+      <div class="filter-bar">
+        <div class="search-box">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="search-input" class="search-input" placeholder="输入名称、虚拟 IP、公钥过滤...">
+        </div>
+        <div class="filter-tabs">
+          <button class="filter-tab active" data-filter="all">全部</button>
+          <button class="filter-tab" data-filter="online">在线</button>
+          <button class="filter-tab" data-filter="offline">离线</button>
+          <button class="filter-tab" data-filter="disabled">已禁用</button>
+        </div>
+      </div>
+
       <div style="overflow-x: auto;">
         <table>
           <thead>
@@ -350,13 +708,13 @@
               <th>在线状态</th>
               <th>最近握手</th>
               <th>传输流量 (下行 / 上行)</th>
-              <th>端点</th>
+              <th>对端地址</th>
               <th>公钥</th>
-              <th>操作</th>
+              <th style="text-align: right;">操作</th>
             </tr>
           </thead>
           <tbody id="clients-table-body">
-            <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
+            <tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem 0;">正在加载数据...</td></tr>
           </tbody>
         </table>
       </div>
@@ -365,6 +723,17 @@
 
   <script>
     const API_HEADER = { 'X-Requested-With': 'wg-panel', 'Content-Type': 'application/json' };
+
+    // Toast 浮动通知
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.innerHTML = `<span>${escapeHtml(msg)}</span><button style="background:none;border:none;color:inherit;cursor:pointer;font-size:1.1rem;">&times;</button>`;
+      toast.querySelector('button').onclick = () => toast.remove();
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 3500);
+    }
 
     async function api(url, options = {}) {
       options.headers = Object.assign({}, API_HEADER, options.headers || {});
@@ -410,23 +779,66 @@
     }
 
     let currentServerInfo = {};
+    let rawClientsList = [];
+    let rawLiveStatus = null;
+    let activeFilter = 'all';
+    let activeSearch = '';
 
     async function loadDashboard() {
+      const icon = document.getElementById('refresh-icon');
+      if (icon) icon.style.animation = 'spin 0.6s linear infinite';
+
       try {
-        const [server, clients, liveStatus, version, redist] = await Promise.all([
+        const [server, clients, liveStatus, version, redist, sysStats] = await Promise.all([
           api('/api/server'),
           api('/api/clients'),
           api('/api/status').catch(() => null),
           api('/api/version').catch(() => null),
-          api('/api/redistribution').catch(() => null)
+          api('/api/redistribution').catch(() => null),
+          api('/api/system/stats').catch(() => null)
         ]);
 
         currentServerInfo = server;
+        rawClientsList = clients;
+        rawLiveStatus = liveStatus;
 
         if (version && version.version) {
           document.getElementById('version-badge').textContent = 'v' + version.version;
         }
 
+        // 渲染系统统计
+        if (sysStats) {
+          document.getElementById('sys-cores').textContent = sysStats.cpu.cores;
+          const cpuPercent = Math.round(sysStats.cpu.usagePercent);
+          document.getElementById('sys-cpu').textContent = cpuPercent + ' %';
+          const cpuBar = document.getElementById('sys-cpu-bar');
+          cpuBar.style.width = cpuPercent + '%';
+          cpuBar.className = 'progress-bar' + (cpuPercent > 85 ? ' danger' : (cpuPercent > 65 ? ' warn' : ''));
+
+          const memUsedMb = Math.round(sysStats.memory.usedBytes / 1048576);
+          const memTotalMb = Math.round(sysStats.memory.totalBytes / 1048576);
+          const memPercent = Math.round(sysStats.memory.usagePercent);
+          document.getElementById('sys-mem-text').textContent = `${memUsedMb}M / ${memTotalMb}M`;
+          document.getElementById('sys-mem').textContent = memPercent + ' %';
+          const memBar = document.getElementById('sys-mem-bar');
+          memBar.style.width = memPercent + '%';
+          memBar.className = 'progress-bar' + (memPercent > 85 ? ' danger' : (memPercent > 70 ? ' warn' : ''));
+
+          const diskUsedGb = (sysStats.disk.usedBytes / 1073741824).toFixed(1);
+          const diskTotalGb = (sysStats.disk.totalBytes / 1073741824).toFixed(1);
+          const diskPercent = Math.round(sysStats.disk.usagePercent);
+          document.getElementById('sys-disk-text').textContent = `${diskUsedGb}G / ${diskTotalGb}G`;
+          document.getElementById('sys-disk').textContent = diskPercent + ' %';
+          const diskBar = document.getElementById('sys-disk-bar');
+          diskBar.style.width = diskPercent + '%';
+          diskBar.className = 'progress-bar' + (diskPercent > 85 ? ' danger' : (diskPercent > 70 ? ' warn' : ''));
+
+          const days = Math.floor(sysStats.uptime.systemSeconds / 86400);
+          const hours = Math.floor((sysStats.uptime.systemSeconds % 86400) / 3600);
+          document.getElementById('sys-uptime').textContent = `${days}天 ${hours}小时`;
+        }
+
+        // 渲染服务器配置
         document.getElementById('srv-endpoint').textContent = server.endpoint || '(未设置)';
         document.getElementById('srv-port').textContent = server.listenPort || '-';
         document.getElementById('srv-subnet4').textContent = server.subnetV4 || '-';
@@ -434,64 +846,96 @@
         document.getElementById('srv-mtu').textContent = server.mtu > 0 ? server.mtu : '1420 (默认)';
         document.getElementById('srv-firewall').textContent = server.firewallBackend || 'iptables';
 
-        // 防火墙未放行提醒
+        // 告警横幅
         if (liveStatus && liveStatus.allNeverHandshake && clients.length > 0) {
           document.getElementById('firewall-warning').classList.remove('hidden');
         } else {
           document.getElementById('firewall-warning').classList.add('hidden');
         }
-
-        // 端点重分发提醒
         if (redist && redist.needed) {
           document.getElementById('redistribute-warning').classList.remove('hidden');
         } else {
           document.getElementById('redistribute-warning').classList.add('hidden');
         }
 
-        renderClients(clients, liveStatus);
+        applyFilterAndRender();
       } catch (err) {
-        console.error('加载面板失败', err);
+        showToast('获取控制台数据失败: ' + err.message, 'error');
+      } finally {
+        if (icon) setTimeout(() => { icon.style.animation = ''; }, 300);
       }
     }
 
-    function renderClients(clients, liveStatus) {
-      document.getElementById('clients-count').textContent = clients.length;
-      const tbody = document.getElementById('clients-table-body');
-      if (clients.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无客户端，点击上方按钮添加</td></tr>';
-        return;
-      }
-
+    function applyFilterAndRender() {
       const statusMap = {};
-      if (liveStatus && liveStatus.peers) {
-        for (const p of liveStatus.peers) {
+      if (rawLiveStatus && rawLiveStatus.peers) {
+        for (const p of rawLiveStatus.peers) {
           statusMap[p.publicKey] = p;
         }
       }
 
-      tbody.innerHTML = clients.map(c => {
+      const filtered = rawClientsList.filter(c => {
         const p = statusMap[c.publicKey] || {};
         const isOnline = p.hasHandshook;
-        const statusHtml = isOnline
-          ? '<span class="status-dot status-online"></span>在线'
-          : '<span class="status-dot status-offline"></span>离线';
+        const isDisabled = c.disabled;
+
+        if (activeFilter === 'online' && (!isOnline || isDisabled)) return false;
+        if (activeFilter === 'offline' && (isOnline || isDisabled)) return false;
+        if (activeFilter === 'disabled' && !isDisabled) return false;
+
+        if (activeSearch) {
+          const q = activeSearch.toLowerCase();
+          const matchName = c.name.toLowerCase().includes(q);
+          const matchIP = (c.ipV4 || '').includes(q) || (c.ipV6 || '').includes(q);
+          const matchKey = (c.publicKey || '').toLowerCase().includes(q);
+          if (!matchName && !matchIP && !matchKey) return false;
+        }
+        return true;
+      });
+
+      renderClientsTable(filtered, statusMap);
+    }
+
+    function renderClientsTable(clients, statusMap) {
+      document.getElementById('clients-count').textContent = clients.length;
+      const tbody = document.getElementById('clients-table-body');
+      if (clients.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem 0;">未找到匹配的客户端</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = clients.map(c => {
+        const p = statusMap[c.publicKey] || {};
+        let statusHtml = '';
+        if (c.disabled) {
+          statusHtml = '<span class="status-pill disabled"><span class="status-dot status-disabled"></span>已停用</span>';
+        } else if (p.hasHandshook) {
+          statusHtml = '<span class="status-pill online"><span class="status-dot status-online"></span>在线</span>';
+        } else {
+          statusHtml = '<span class="status-pill offline"><span class="status-dot status-offline"></span>离线</span>';
+        }
+
         const handshake = p.latestHandshake || '(从未连接)';
-        const traffic = p.transferRx ? (p.transferRx + ' / ' + p.transferTx) : '-';
+        const traffic = p.transferRx ? `${p.transferRx} / ${p.transferTx}` : '-';
         const ep = p.endpoint || '-';
 
+        const toggleActionBtn = c.disabled
+          ? `<button onclick="enableClient('${escapeHtml(c.name)}')" class="btn btn-sm btn-secondary" title="启用连接">启用</button>`
+          : `<button onclick="disableClient('${escapeHtml(c.name)}')" class="btn btn-sm btn-secondary" title="临时断开连接">停用</button>`;
+
         return `<tr>
-          <td><strong>${escapeHtml(c.name)}</strong></td>
-          <td>${escapeHtml(c.ipV4)}${c.ipV6 ? '<br><small style="color:var(--text-muted);">' + escapeHtml(c.ipV6) + '</small>' : ''}</td>
-          <td>${statusHtml}</td>
-          <td><small>${escapeHtml(handshake)}</small></td>
-          <td><small>${escapeHtml(traffic)}</small></td>
-          <td><small>${escapeHtml(ep)}</small></td>
-          <td><span class="peer-key" title="${escapeHtml(c.publicKey)}">${escapeHtml(c.publicKey.slice(0, 8))}...</span></td>
-          <td class="actions-cell">
-            <button onclick="viewClientQR('${escapeHtml(c.name)}')" class="btn btn-sm">配置/二维码</button>
-            <a href="/api/clients/${encodeURIComponent(c.name)}/config" download="${escapeHtml(c.name)}.conf" class="btn btn-secondary btn-sm">下载</a>
-            <button onclick="rotateClientKey('${escapeHtml(c.name)}')" class="btn btn-secondary btn-sm" title="更换新密钥（旧设备断开）">重置</button>
-            <button onclick="deleteClient('${escapeHtml(c.name)}')" class="btn btn-danger btn-sm">删除</button>
+          <td data-label="名称"><strong>${escapeHtml(c.name)}</strong></td>
+          <td data-label="虚拟 IP">${escapeHtml(c.ipV4)}${c.ipV6 ? '<br><small style="color:var(--text-sub);">' + escapeHtml(c.ipV6) + '</small>' : ''}</td>
+          <td data-label="状态">${statusHtml}</td>
+          <td data-label="握手"><small>${escapeHtml(handshake)}</small></td>
+          <td data-label="流量"><small>${escapeHtml(traffic)}</small></td>
+          <td data-label="对端"><small>${escapeHtml(ep)}</small></td>
+          <td data-label="公钥"><span class="peer-key" title="${escapeHtml(c.publicKey)}">${escapeHtml(c.publicKey.slice(0, 8))}...</span></td>
+          <td data-label="操作" class="actions-cell">
+            <button onclick="openClientDetail('${escapeHtml(c.name)}')" class="btn btn-sm">配置/扫码</button>
+            ${toggleActionBtn}
+            <button onclick="rotateClientKey('${escapeHtml(c.name)}')" class="btn btn-sm btn-secondary" title="重置密钥对">重置</button>
+            <button onclick="deleteClient('${escapeHtml(c.name)}')" class="btn btn-sm btn-danger" title="删除客户端">&times;</button>
           </td>
         </tr>`;
       }).join('');
@@ -502,6 +946,7 @@
       return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    // Modal 控制器
     function openPasswordModal(force) {
       const modal = document.getElementById('pwd-modal');
       const cancelBtn = document.getElementById('pwd-cancel-btn');
@@ -516,69 +961,177 @@
       }
     }
 
-    async function viewClientQR(name) {
-      try {
-        const res = await fetch(`/api/clients/${encodeURIComponent(name)}/config`, { headers: API_HEADER });
-        if (!res.ok) throw new Error('读取配置失败');
-        const confText = await res.text();
-        showQRModal(name, `/api/clients/${encodeURIComponent(name)}/qr.png?t=${Date.now()}`, confText);
-      } catch (err) {
-        alert(err.message);
-      }
-    }
+    let activeModalClient = '';
+    let activeModalMode = 'full';
 
-    function showQRModal(name, qrUrl, confText) {
-      document.getElementById('qr-modal-title').textContent = `客户端: ${name}`;
-      document.getElementById('qr-image').src = qrUrl;
-      document.getElementById('conf-preview').textContent = confText;
-
-      const dlBtn = document.getElementById('download-conf-btn');
-      dlBtn.href = `data:text/plain;charset=utf-8,${encodeURIComponent(confText)}`;
-      dlBtn.download = `${name}.conf`;
-
-      document.getElementById('copy-conf-btn').onclick = async () => {
-        try {
-          await navigator.clipboard.writeText(confText);
-          alert('配置文本已复制到剪贴板！');
-        } catch {
-          alert('请手动选择下方文本框进行复制');
-        }
-      };
-
+    async function openClientDetail(name) {
+      activeModalClient = name;
+      activeModalMode = 'full';
+      updateModalModeUI();
+      await fetchAndDisplayClientConfig();
       document.getElementById('client-qr-modal').classList.remove('hidden');
     }
 
-    async function rotateClientKey(name) {
-      if (!confirm(`确定要重置客户端 ${name} 的密钥吗？\n重置后旧设备将立即掉线，需要使用新生成的配置或扫码重新连接！`)) {
-        return;
-      }
+    async function fetchAndDisplayClientConfig() {
+      const name = activeModalClient;
+      const mode = activeModalMode;
       try {
-        const res = await api(`/api/clients/${encodeURIComponent(name)}/rotate-key`, { method: 'POST' });
-        alert(`客户端 ${name} 密钥已重置成功！`);
-        showQRModal(name, `/api/clients/${encodeURIComponent(name)}/qr.png?t=${Date.now()}`, res.config);
+        const res = await fetch(`/api/clients/${encodeURIComponent(name)}/config?mode=${mode}`, { headers: API_HEADER });
+        if (!res.ok) throw new Error('读取客户端配置失败');
+        const confText = await res.text();
+        document.getElementById('qr-modal-title').textContent = `客户端: ${name}`;
+        document.getElementById('qr-image').src = `/api/clients/${encodeURIComponent(name)}/qr.png?mode=${mode}&t=${Date.now()}`;
+        document.getElementById('conf-preview').textContent = confText;
+
+        const dlBtn = document.getElementById('download-conf-btn');
+        dlBtn.href = `data:text/plain;charset=utf-8,${encodeURIComponent(confText)}`;
+        dlBtn.download = `${name}-${mode}.conf`;
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    function updateModalModeUI() {
+      const fullBtn = document.getElementById('mode-full-btn');
+      const splitBtn = document.getElementById('mode-split-btn');
+      const desc = document.getElementById('mode-desc');
+      if (activeModalMode === 'split') {
+        splitBtn.classList.add('active');
+        fullBtn.classList.remove('active');
+        desc.innerHTML = '<strong>分流模式</strong>：仅访问组网虚拟网段走隧道，本地日常外网流量直通高速宽带，不卡顿。';
+      } else {
+        fullBtn.classList.add('active');
+        splitBtn.classList.remove('active');
+        desc.innerHTML = '<strong>全局模式</strong>：所有上网流量经本服务器中转；若服务器出口带宽受限，网速可能会降低。';
+      }
+    }
+
+    document.getElementById('mode-full-btn').onclick = async () => {
+      activeModalMode = 'full';
+      updateModalModeUI();
+      await fetchAndDisplayClientConfig();
+    };
+
+    document.getElementById('mode-split-btn').onclick = async () => {
+      activeModalMode = 'split';
+      updateModalModeUI();
+      await fetchAndDisplayClientConfig();
+    };
+
+    document.getElementById('copy-conf-btn').onclick = async () => {
+      const text = document.getElementById('conf-preview').textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        const status = document.getElementById('copy-status');
+        status.classList.remove('hidden');
+        setTimeout(() => status.classList.add('hidden'), 2000);
+        showToast('配置文本已复制到剪贴板', 'success');
+      } catch {
+        showToast('请手动选中文本框进行复制', 'warning');
+      }
+    };
+
+    async function disableClient(name) {
+      if (!confirm(`确定要停用客户端 ${name} 吗？停用后连接将立即切断。`)) return;
+      try {
+        await api(`/api/clients/${encodeURIComponent(name)}/disable`, { method: 'PUT' });
+        showToast(`已成功停用 ${name}`, 'info');
         loadDashboard();
       } catch (err) {
-        alert('重置密钥失败: ' + err.message);
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function enableClient(name) {
+      try {
+        await api(`/api/clients/${encodeURIComponent(name)}/enable`, { method: 'PUT' });
+        showToast(`已重新启用 ${name}`, 'success');
+        loadDashboard();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function rotateClientKey(name) {
+      if (!confirm(`确定重置 ${name} 的密钥对吗？旧设备将立刻断开！`)) return;
+      try {
+        await api(`/api/clients/${encodeURIComponent(name)}/rotate-key`, { method: 'POST' });
+        showToast(`密钥已重置成功`, 'success');
+        openClientDetail(name);
+        loadDashboard();
+      } catch (err) {
+        showToast('重置密钥失败: ' + err.message, 'error');
       }
     }
 
     async function deleteClient(name) {
-      if (!confirm(`确定要删除客户端 ${name} 吗？\n删除后该客户端将无法连接。`)) {
-        return;
-      }
+      if (!confirm(`确定要彻底删除客户端 ${name} 吗？`)) return;
       try {
         const res = await api(`/api/clients/${encodeURIComponent(name)}`, { method: 'DELETE' });
-        if (res.orphanNotice) {
-          alert(res.orphanNotice);
-        }
+        showToast(`已删除客户端 ${name}`, 'info');
+        if (res.orphanNotice) showToast(res.orphanNotice, 'warning');
         loadDashboard();
       } catch (err) {
-        alert('删除失败: ' + err.message);
+        showToast('删除失败: ' + err.message, 'error');
       }
     }
 
+    // 备份管理
+    async function openBackupsModal() {
+      document.getElementById('backups-modal').classList.remove('hidden');
+      await loadBackupsList();
+    }
+
+    async function loadBackupsList() {
+      const tbody = document.getElementById('backups-table-body');
+      try {
+        const list = await api('/api/backups');
+        if (!list || list.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无历史备份</td></tr>';
+          return;
+        }
+        tbody.innerHTML = list.map(b => `<tr>
+          <td>${new Date(b.createdAt).toLocaleString()}</td>
+          <td><small>${escapeHtml(b.filename)}</small></td>
+          <td>${b.peersCount} 个</td>
+          <td>${Math.round(b.size)} B</td>
+          <td><button onclick="restoreBackup('${escapeHtml(b.filename)}')" class="btn btn-sm btn-secondary">恢复</button></td>
+        </tr>`).join('');
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger);">${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    async function restoreBackup(filename) {
+      if (!confirm(`确定要回滚到备份 ${filename} 吗？系统将在恢复前自动对当前配置创建安全快照。`)) return;
+      try {
+        await api(`/api/backups/${encodeURIComponent(filename)}/restore`, { method: 'POST' });
+        showToast(`已成功回滚至 ${filename}`, 'success');
+        document.getElementById('backups-modal').classList.add('hidden');
+        loadDashboard();
+      } catch (err) {
+        showToast('回滚失败: ' + err.message, 'error');
+      }
+    }
+
+    document.getElementById('create-snapshot-btn').onclick = async () => {
+      try {
+        const res = await api('/api/backups', { method: 'POST' });
+        showToast(`快照创建成功: ${res.backup}`, 'success');
+        loadBackupsList();
+      } catch (err) {
+        showToast('快照创建失败: ' + err.message, 'error');
+      }
+    };
+
     // 事件绑定
-    document.getElementById('login-form').addEventListener('submit', async (e) => {
+    document.querySelectorAll('.close-modal-btn').forEach(b => {
+      b.onclick = () => document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden'));
+    });
+
+    document.getElementById('open-backups-btn').onclick = openBackupsModal;
+
+    document.getElementById('login-form').onsubmit = async (e) => {
       e.preventDefault();
       const errBox = document.getElementById('login-error');
       errBox.classList.add('hidden');
@@ -600,9 +1153,9 @@
         errBox.textContent = err.message;
         errBox.classList.remove('hidden');
       }
-    });
+    };
 
-    document.getElementById('pwd-form').addEventListener('submit', async (e) => {
+    document.getElementById('pwd-form').onsubmit = async (e) => {
       e.preventDefault();
       const errBox = document.getElementById('pwd-error');
       errBox.classList.add('hidden');
@@ -615,72 +1168,76 @@
           })
         });
         document.getElementById('pwd-modal').classList.add('hidden');
-        alert('密码修改成功！');
+        showToast('密码修改成功！', 'success');
         loadDashboard();
       } catch (err) {
         errBox.textContent = err.message;
         errBox.classList.remove('hidden');
       }
-    });
+    };
 
-    // 添加客户端
-    document.getElementById('add-client-btn').addEventListener('click', () => {
+    document.getElementById('add-client-btn').onclick = () => {
       document.getElementById('add-client-form').reset();
-      document.getElementById('add-client-error').classList.add('hidden');
+      document.getElementById('client-dns').classList.add('hidden');
       document.getElementById('add-client-modal').classList.remove('hidden');
-    });
+    };
 
-    document.getElementById('add-client-cancel-btn').addEventListener('click', () => {
+    document.getElementById('add-client-cancel-btn').onclick = () => {
       document.getElementById('add-client-modal').classList.add('hidden');
-    });
+    };
 
-    document.getElementById('add-client-form').addEventListener('submit', async (e) => {
+    document.getElementById('client-dns-preset').onchange = (e) => {
+      const customInput = document.getElementById('client-dns');
+      if (e.target.value === 'custom') {
+        customInput.classList.remove('hidden');
+      } else {
+        customInput.classList.add('hidden');
+      }
+    };
+
+    document.getElementById('add-client-form').onsubmit = async (e) => {
       e.preventDefault();
-      const errBox = document.getElementById('add-client-error');
-      errBox.classList.add('hidden');
       const submitBtn = document.getElementById('add-client-submit-btn');
       submitBtn.disabled = true;
       submitBtn.textContent = '创建中...';
 
       const name = document.getElementById('client-name').value.trim();
-      const dnsRaw = document.getElementById('client-dns').value.trim();
+      const preset = document.getElementById('client-dns-preset').value;
+      let dnsRaw = preset === 'custom' ? document.getElementById('client-dns').value.trim() : preset;
       const dns = dnsRaw ? dnsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
 
       try {
-        const res = await api('/api/clients', {
+        await api('/api/clients', {
           method: 'POST',
           body: JSON.stringify({ name, dns })
         });
         document.getElementById('add-client-modal').classList.add('hidden');
-        showQRModal(name, `/api/clients/${encodeURIComponent(name)}/qr.png?t=${Date.now()}`, res.config);
+        showToast(`客户端 ${name} 创建成功`, 'success');
+        openClientDetail(name);
         loadDashboard();
       } catch (err) {
-        errBox.textContent = err.message;
-        errBox.classList.remove('hidden');
+        showToast(err.message, 'error');
       } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = '立即创建';
       }
-    });
+    };
 
-    // 修改服务器端点与端口
-    document.getElementById('edit-srv-btn').addEventListener('click', () => {
-      document.getElementById('edit-server-error').classList.add('hidden');
+    document.getElementById('edit-srv-btn').onclick = () => {
       document.getElementById('srv-endpoint-input').value = currentServerInfo.endpoint || '';
       document.getElementById('srv-port-input').value = currentServerInfo.listenPort || 53;
       document.getElementById('srv-mtu-input').value = currentServerInfo.mtu > 0 ? currentServerInfo.mtu : '1420';
       document.getElementById('edit-server-modal').classList.remove('hidden');
-    });
+    };
 
-    document.getElementById('edit-server-cancel-btn').addEventListener('click', () => {
+    document.getElementById('edit-server-cancel-btn').onclick = () => {
       document.getElementById('edit-server-modal').classList.add('hidden');
-    });
+    };
 
-    document.getElementById('edit-server-form').addEventListener('submit', async (e) => {
+    document.getElementById('edit-server-form').onsubmit = async (e) => {
       e.preventDefault();
-      const errBox = document.getElementById('edit-server-error');
-      errBox.classList.add('hidden');
-
+      const submitBtn = document.getElementById('edit-server-submit-btn');
+      submitBtn.disabled = true;
       const endpoint = document.getElementById('srv-endpoint-input').value.trim();
       const listenPort = parseInt(document.getElementById('srv-port-input').value, 10);
       const mtu = parseInt(document.getElementById('srv-mtu-input').value, 10);
@@ -691,32 +1248,37 @@
           body: JSON.stringify({ endpoint, listenPort, mtu })
         });
         document.getElementById('edit-server-modal').classList.add('hidden');
-        alert('服务器端点与参数修改成功！\n请注意下载最新配置文件或为存量客户端重新导入配置。');
+        showToast('服务器网络参数已成功应用！', 'success');
         loadDashboard();
       } catch (err) {
-        errBox.textContent = err.message;
-        errBox.classList.remove('hidden');
+        showToast(err.message, 'error');
+      } finally {
+        submitBtn.disabled = false;
       }
+    };
+
+    // 搜索与过滤事件
+    document.getElementById('search-input').oninput = (e) => {
+      activeSearch = e.target.value.trim();
+      applyFilterAndRender();
+    };
+
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+      tab.onclick = () => {
+        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        activeFilter = tab.dataset.filter;
+        applyFilterAndRender();
+      };
     });
 
-    document.getElementById('qr-modal-close-btn').addEventListener('click', () => {
-      document.getElementById('client-qr-modal').classList.add('hidden');
-    });
-
-    document.getElementById('pwd-cancel-btn').addEventListener('click', () => {
-      document.getElementById('pwd-modal').classList.add('hidden');
-    });
-
-    document.getElementById('change-pwd-btn').addEventListener('click', () => {
-      openPasswordModal(false);
-    });
-
-    document.getElementById('logout-btn').addEventListener('click', async () => {
+    document.getElementById('pwd-cancel-btn').onclick = () => document.getElementById('pwd-modal').classList.add('hidden');
+    document.getElementById('change-pwd-btn').onclick = () => openPasswordModal(false);
+    document.getElementById('logout-btn').onclick = async () => {
       await api('/api/logout', { method: 'POST' }).catch(() => {});
       showLogin();
-    });
-
-    document.getElementById('refresh-btn').addEventListener('click', loadDashboard);
+    };
+    document.getElementById('refresh-btn').onclick = loadDashboard;
 
     checkSession();
   </script>

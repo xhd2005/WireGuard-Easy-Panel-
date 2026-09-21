@@ -5,6 +5,10 @@ fixtures/raw/
 panel/web/node_modules/
 panel/web/dist/
 panel/bin/
+dist/
+
+# 本地调试临时脚本与凭据
+scripts/run-remote-*.sh
 
 # 客户端实际私钥配置（切勿提交）
 *.conf

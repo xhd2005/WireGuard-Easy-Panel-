@@ -10,12 +10,25 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/xaxanb/wg/panel/internal/wgconf"
 )
+
+// BackupInfo 描述一份历史备份的信息。
+type BackupInfo struct {
+	Filename   string    `json:"filename"`
+	CreatedAt  time.Time `json:"createdAt"`
+	Size       int64     `json:"size"`
+	PeersCount int       `json:"peersCount"`
+}
 
 // Applier 抽象服务端写与热加载操作，便于单测 mock。
 type Applier interface {
 	WithLock(fn func() error) error
 	Backup() (string, error)
+	ListBackups() ([]BackupInfo, error)
+	GetBackup(filename string) ([]byte, error)
+	RestoreBackup(filename string) error
 	WriteAtomic(data []byte) error
 	SyncConf() error
 	RestartService(name string) error
@@ -108,6 +121,82 @@ func (a *RealApplier) cleanOldBackups(keep int) {
 	for i := 0; i < len(baks)-keep; i++ {
 		_ = os.Remove(baks[i])
 	}
+}
+
+// ListBackups 列出当前现存的备份快照（按时间倒序排列）。
+func (a *RealApplier) ListBackups() ([]BackupInfo, error) {
+	entries, err := os.ReadDir(a.BackupDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var list []BackupInfo
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, "wg0.conf.") && strings.HasSuffix(name, ".bak") {
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			bInfo := BackupInfo{
+				Filename:  name,
+				CreatedAt: info.ModTime(),
+				Size:      info.Size(),
+			}
+			// 提取 peer 数量
+			if b, err := os.ReadFile(filepath.Join(a.BackupDir, name)); err == nil {
+				if srv, err := wgconf.Parse(b); err == nil {
+					bInfo.PeersCount = len(srv.Peers)
+				}
+			}
+			list = append(list, bInfo)
+		}
+	}
+
+	// 按时间倒序排序
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.After(list[j].CreatedAt)
+	})
+	return list, nil
+}
+
+// GetBackup 读取特定备份文件的内容。
+func (a *RealApplier) GetBackup(filename string) ([]byte, error) {
+	clean := filepath.Base(filename)
+	if !strings.HasPrefix(clean, "wg0.conf.") || !strings.HasSuffix(clean, ".bak") {
+		return nil, errors.New("apply: 非法的备份文件名")
+	}
+	src := filepath.Join(a.BackupDir, clean)
+	return os.ReadFile(src)
+}
+
+// RestoreBackup 将指定的历史备份文件校验并原子恢复到 wg0.conf，并触发热重载。
+func (a *RealApplier) RestoreBackup(filename string) error {
+	clean := filepath.Base(filename)
+	if !strings.HasPrefix(clean, "wg0.conf.") || !strings.HasSuffix(clean, ".bak") {
+		return errors.New("apply: 非法的备份文件名")
+	}
+	src := filepath.Join(a.BackupDir, clean)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("apply: 读取备份失败: %w", err)
+	}
+
+	// 完整性校验：必须通过 wgconf 解析，绝不把坏配置恢复进系统
+	if _, err := wgconf.Parse(data); err != nil {
+		return fmt.Errorf("apply: 目标备份配置已损坏或不完整: %w", err)
+	}
+
+	// 恢复前先备份一份当前正在运行的配置
+	_, _ = a.Backup()
+
+	if err := a.WriteAtomic(data); err != nil {
+		return err
+	}
+	return a.SyncConf()
 }
 
 // WriteAtomic 采用 temp + rename 原子写入，保证即使进程被杀也不会留下半截配置。

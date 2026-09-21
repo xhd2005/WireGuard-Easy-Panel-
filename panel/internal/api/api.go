@@ -22,6 +22,7 @@ import (
 	"github.com/xaxanb/wg/panel/internal/keygen"
 	"github.com/xaxanb/wg/panel/internal/qr"
 	"github.com/xaxanb/wg/panel/internal/status"
+	"github.com/xaxanb/wg/panel/internal/system"
 	"github.com/xaxanb/wg/panel/internal/wgconf"
 )
 
@@ -126,17 +127,25 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/clients", s.withAuth(s.handleClientsList))
 	s.mux.HandleFunc("GET /api/status", s.withAuth(s.handleStatus))
 	s.mux.HandleFunc("GET /api/redistribution", s.withAuth(s.handleRedistributionStatus))
+	s.mux.HandleFunc("GET /api/system/stats", s.withAuth(s.handleSystemStats))
 
 	// 阶段 4：写操作端点
 	s.mux.HandleFunc("POST /api/clients", s.withAuth(s.handleAddClient))
 	s.mux.HandleFunc("DELETE /api/clients/{name}", s.withAuth(s.handleDeleteClient))
 	s.mux.HandleFunc("POST /api/clients/{name}/rotate-key", s.withAuth(s.handleRotateKey))
+	s.mux.HandleFunc("PUT /api/clients/{name}/enable", s.withAuth(s.handleEnableClient))
+	s.mux.HandleFunc("PUT /api/clients/{name}/disable", s.withAuth(s.handleDisableClient))
 	s.mux.HandleFunc("GET /api/clients/{name}/config", s.withAuth(s.handleGetClientConfig))
 	s.mux.HandleFunc("GET /api/clients/{name}/qr.png", s.withAuth(s.handleGetClientQR))
 
 	// 阶段 5：变更与批量导出
 	s.mux.HandleFunc("PUT /api/server/endpoint", s.withAuth(s.handleUpdateEndpoint))
 	s.mux.HandleFunc("GET /api/clients/export.zip", s.withAuth(s.handleExportZip))
+
+	// 备份管理端点
+	s.mux.HandleFunc("GET /api/backups", s.withAuth(s.handleListBackups))
+	s.mux.HandleFunc("POST /api/backups", s.withAuth(s.handleCreateBackup))
+	s.mux.HandleFunc("POST /api/backups/{filename}/restore", s.withAuth(s.handleRestoreBackup))
 
 	// 嵌入静态前端资源
 	if s.webFS != nil {
@@ -344,6 +353,8 @@ func (s *Server) handleClientsList(w http.ResponseWriter, r *http.Request) {
 		PublicKey string   `json:"publicKey"`
 		DNSKnown  bool     `json:"dnsKnown"`
 		DNS       []string `json:"dns"`
+		Disabled  bool     `json:"disabled"`
+		RouteMode string   `json:"routeMode"`
 	}
 
 	list := make([]clientItem, 0, len(srv.Peers))
@@ -363,6 +374,8 @@ func (s *Server) handleClientsList(w http.ResponseWriter, r *http.Request) {
 			PublicKey: p.PublicKey,
 			DNSKnown:  p.DNSKnown,
 			DNS:       p.DNS,
+			Disabled:  p.Disabled,
+			RouteMode: p.RouteMode,
 		})
 	}
 
@@ -674,6 +687,9 @@ func (s *Server) handleGetClientConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mode := r.URL.Query().Get("mode")
+	conf = adjustRouteMode(conf, mode)
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".conf"))
 	w.Header().Set("Cache-Control", "no-store")
@@ -688,6 +704,9 @@ func (s *Server) handleGetClientQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mode := r.URL.Query().Get("mode")
+	conf = adjustRouteMode(conf, mode)
+
 	png, err := qr.GeneratePNG(conf, 320)
 	if err != nil {
 		s.jsonError(w, http.StatusInternalServerError, "qr_failed", err.Error())
@@ -697,6 +716,157 @@ func (s *Server) handleGetClientQR(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(png)
+}
+
+func (s *Server) handleEnableClient(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		s.jsonError(w, http.StatusBadRequest, "bad_request", "缺少客户端名称")
+		return
+	}
+
+	err := s.applier.WithLock(func() error {
+		data, err := s.reader.ReadWGConf()
+		if err != nil {
+			return err
+		}
+		srv, err := wgconf.Parse(data)
+		if err != nil {
+			return err
+		}
+		if !srv.HasPeer(name) {
+			return errors.New("not_found")
+		}
+		if err := srv.SetPeerDisabled(name, false); err != nil {
+			return err
+		}
+		if _, err := s.applier.Backup(); err != nil {
+			return err
+		}
+		if err := s.applier.WriteAtomic(srv.Marshal()); err != nil {
+			return err
+		}
+		return s.applier.SyncConf()
+	})
+
+	if err != nil {
+		if err.Error() == "not_found" {
+			s.jsonError(w, http.StatusNotFound, "not_found", fmt.Sprintf("客户端 %s 不存在", name))
+			return
+		}
+		s.jsonError(w, http.StatusInternalServerError, "enable_failed", err.Error())
+		return
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]any{"status": "ok", "name": name, "disabled": false})
+}
+
+func (s *Server) handleDisableClient(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		s.jsonError(w, http.StatusBadRequest, "bad_request", "缺少客户端名称")
+		return
+	}
+
+	err := s.applier.WithLock(func() error {
+		data, err := s.reader.ReadWGConf()
+		if err != nil {
+			return err
+		}
+		srv, err := wgconf.Parse(data)
+		if err != nil {
+			return err
+		}
+		if !srv.HasPeer(name) {
+			return errors.New("not_found")
+		}
+		if err := srv.SetPeerDisabled(name, true); err != nil {
+			return err
+		}
+		if _, err := s.applier.Backup(); err != nil {
+			return err
+		}
+		if err := s.applier.WriteAtomic(srv.Marshal()); err != nil {
+			return err
+		}
+		return s.applier.SyncConf()
+	})
+
+	if err != nil {
+		if err.Error() == "not_found" {
+			s.jsonError(w, http.StatusNotFound, "not_found", fmt.Sprintf("客户端 %s 不存在", name))
+			return
+		}
+		s.jsonError(w, http.StatusInternalServerError, "disable_failed", err.Error())
+		return
+	}
+
+	s.jsonResponse(w, http.StatusOK, map[string]any{"status": "ok", "name": name, "disabled": true})
+}
+
+func (s *Server) handleListBackups(w http.ResponseWriter, r *http.Request) {
+	list, err := s.applier.ListBackups()
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "list_backups_failed", err.Error())
+		return
+	}
+	s.jsonResponse(w, http.StatusOK, list)
+}
+
+func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
+	var path string
+	err := s.applier.WithLock(func() error {
+		var err error
+		path, err = s.applier.Backup()
+		return err
+	})
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "backup_failed", err.Error())
+		return
+	}
+	s.jsonResponse(w, http.StatusOK, map[string]string{"status": "ok", "backup": filepath.Base(path)})
+}
+
+func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
+	filename := r.PathValue("filename")
+	if filename == "" {
+		s.jsonError(w, http.StatusBadRequest, "bad_request", "缺少备份文件名")
+		return
+	}
+	err := s.applier.WithLock(func() error {
+		return s.applier.RestoreBackup(filename)
+	})
+	if err != nil {
+		s.jsonError(w, http.StatusBadRequest, "restore_failed", err.Error())
+		return
+	}
+	s.jsonResponse(w, http.StatusOK, map[string]string{"status": "ok", "restored": filename})
+}
+
+func (s *Server) handleSystemStats(w http.ResponseWriter, r *http.Request) {
+	st, err := system.GetStats()
+	if err != nil {
+		s.jsonError(w, http.StatusInternalServerError, "system_stats_failed", err.Error())
+		return
+	}
+	s.jsonResponse(w, http.StatusOK, st)
+}
+
+func adjustRouteMode(conf, mode string) string {
+	if mode != "split" {
+		return conf
+	}
+	var lines []string
+	for _, line := range strings.Split(conf, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "AllowedIPs") {
+			// 分流模式：默认使用 10.7.0.0/24，避免挤占公网带宽
+			lines = append(lines, "AllowedIPs = 10.7.0.0/24")
+		} else {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ----------------------------------------------------------- Phase 5: Mutation & Batch Handlers

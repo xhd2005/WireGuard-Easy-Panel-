@@ -628,6 +628,72 @@ func TestInvalidMutationsLeaveBytesUntouched(t *testing.T) {
 	}
 }
 
+func TestSetPeerDisabled(t *testing.T) {
+	in := fixture(t, "wg0-ipv6.conf")
+	s := mustParse(t, in)
+
+	// 1. 禁用 phone
+	if err := s.SetPeerDisabled("phone", true); err != nil {
+		t.Fatalf("SetPeerDisabled 失败: %v", err)
+	}
+
+	p, ok := s.findPeer("phone")
+	if !ok || !p.Disabled {
+		t.Errorf("phone 应该处于已禁用状态: %+v", p)
+	}
+	// 关键属性仍然应该被解析出来
+	if p.PublicKey != kPub1 || p.IPv4Octet() != 2 {
+		t.Errorf("被禁用的 peer 属性解析不完整: %+v", p)
+	}
+
+	// 关键安全特性验证：被禁用的 peer 占用的 .2 依然算作占用，不能被重新分配！
+	octet, err := s.AllocateOctet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if octet == 2 {
+		t.Errorf("严重错误：已禁用的 peer 占用的 IP 2 被重复分配！分配结果: %d", octet)
+	}
+
+	// 导出的文本中应该包含 # DISABLED 且关键行有注释前缀
+	out := string(s.Marshal())
+	if !strings.Contains(out, "# DISABLED") || !strings.Contains(out, "# [Peer]") {
+		t.Errorf("导出的配置未正确注释: %s", out)
+	}
+
+	// 2. 重新启用 phone，应该完全恢复
+	if err := s.SetPeerDisabled("phone", false); err != nil {
+		t.Fatalf("重新启用失败: %v", err)
+	}
+	p2, _ := s.findPeer("phone")
+	if p2.Disabled {
+		t.Error("重新启用后 Disabled 应该为 false")
+	}
+
+	// 字节可逆测试：禁用后再启用，应当与原配置完全一致！
+	if !sameBytes(s.Marshal(), in) {
+		t.Errorf("禁用再启用后未做到字节一致:\n%s", s.Marshal())
+	}
+}
+
+func TestSetPeerRouteMode(t *testing.T) {
+	in := fixture(t, "wg0-no-ipv6.conf")
+	s := mustParse(t, in)
+
+	if err := s.SetPeerRouteMode("testphone", "split"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.findPeer("testphone"); p.RouteMode != "split" {
+		t.Errorf("expected RouteMode=split, got %q", p.RouteMode)
+	}
+
+	// 重解析后依然存在
+	s2 := mustParse(t, s.Marshal())
+	if p, _ := s2.findPeer("testphone"); p.RouteMode != "split" {
+		t.Errorf("reparsed RouteMode should be split, got %q", p.RouteMode)
+	}
+}
+
 func BenchmarkParse(b *testing.B) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "fixtures", "wg0-ipv6.conf"))
 	if err != nil {
