@@ -4,7 +4,7 @@ After=network.target wg-quick@wg0.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/wg-panel
+ExecStart=/usr/local/bin/wg-panel --listen 0.0.0.0:8734 --allow-insecure
 Restart=on-failure
 RestartSec=3
 User=root
