@@ -1133,8 +1133,6 @@
 
     document.getElementById('login-form').onsubmit = async (e) => {
       e.preventDefault();
-      const errBox = document.getElementById('login-error');
-      errBox.classList.add('hidden');
       try {
         const res = await api('/api/login', {
           method: 'POST',
@@ -1150,15 +1148,12 @@
           showDashboard();
         }
       } catch (err) {
-        errBox.textContent = err.message;
-        errBox.classList.remove('hidden');
+        showToast(err.message, 'error');
       }
     };
 
     document.getElementById('pwd-form').onsubmit = async (e) => {
       e.preventDefault();
-      const errBox = document.getElementById('pwd-error');
-      errBox.classList.add('hidden');
       try {
         await api('/api/password', {
           method: 'PUT',
@@ -1171,8 +1166,7 @@
         showToast('密码修改成功！', 'success');
         loadDashboard();
       } catch (err) {
-        errBox.textContent = err.message;
-        errBox.classList.remove('hidden');
+        showToast(err.message, 'error');
       }
     };
 
